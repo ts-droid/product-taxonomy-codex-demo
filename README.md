@@ -27,29 +27,42 @@ npm install
 npm run dev
 ```
 
-## Deploy på Railway
-
-Projektet innehåller `railway.json` och en `Caddyfile` för Railway, så byggda filer i `dist/` serveras som en SPA med korrekt fallback-routing och healthcheck.
+För att köra den serverade Railway-versionen lokalt:
 
 ```bash
 npm run build
+npm run start
+```
+
+## Deploy på Railway
+
+Projektet innehåller `railway.json` och en liten Node-server som både:
+
+- serverar den byggda `dist/`-appen
+- exponerar `/api/import-raw` för att hämta verkligt RAW-innehåll från produktsidor
+- exponerar `/api/health` för Railways healthcheck
+
+```bash
+npm run build
+npm run start
 ```
 
 ## Rekommenderat nästa steg i Codex
 
-1. Byt ut slug-baserad parsing mot riktig hämtning av RAW-innehåll.
-2. Lägg in ett separat normaliseringslager för:
+1. Lägg in ett separat normaliseringslager för:
    - color
    - layout
    - wattage
    - connectivity
    - compatibility
-3. Koppla detta till era riktiga LLM-prompter.
-4. Exportera resultat till JSON/CSV.
-5. Lägg till visning av kategori-förslag och taxonomy-versioner.
+2. Koppla detta till era riktiga LLM-prompter.
+3. Exportera resultat till JSON/CSV.
+4. Lägg till visning av kategori-förslag och taxonomy-versioner.
 
 ## Viktiga filer
 
 - `src/lib/catalog.ts` — all nuvarande logik för parsing, taggning och taxonomy
+- `src/lib/rawPipeline.ts` — parsing från verkligt RAW-innehåll + prompt-preview
 - `src/App.tsx` — adminvy och kundvy
+- `server.mjs` — backend för RAW-import och servering i Railway
 - `src/lib/demoData.ts` — defaultdata och settings
