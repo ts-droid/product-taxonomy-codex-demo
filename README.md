@@ -29,11 +29,10 @@ npm run dev
 
 ## Deploy på Railway
 
-Projektet innehåller `railway.json` och kan deployas direkt från GitHub i Railway.
+Projektet innehåller `railway.json` och en `Caddyfile` för Railway, så byggda filer i `dist/` serveras som en SPA med korrekt fallback-routing och healthcheck.
 
 ```bash
 npm run build
-npm run start
 ```
 
 ## Rekommenderat nästa steg i Codex

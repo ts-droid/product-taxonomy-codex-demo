@@ -1,0 +1,18 @@
+{
+  auto_https off
+
+  servers {
+    trusted_proxies static private_ranges 100.0.0.0/8
+  }
+}
+
+:{$PORT:3000} {
+  root * /app/dist
+  encode zstd gzip
+
+  # Always return a quick 200 for Railway's deployment probe.
+  rewrite /health /*
+
+  try_files {path} /index.html
+  file_server
+}
