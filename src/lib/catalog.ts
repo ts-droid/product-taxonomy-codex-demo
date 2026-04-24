@@ -66,22 +66,41 @@ const colorTerms = [
 
 const specMatchers: Array<{ test: (t: string) => string | null }> = [
   { test: (t) => (/(^|\b)usb-c(\b|$)|\busbc\b/.test(t) ? 'usb-c' : null) },
+  { test: (t) => (/(^|\b)usb-a(\b|$)|\busb a\b/.test(t) ? 'usb-a' : null) },
   { test: (t) => (/(^|\b)usb4(\b|$)/.test(t) ? 'usb4' : null) },
   { test: (t) => (/thunderbolt[ -]?5/.test(t) ? 'thunderbolt 5' : null) },
   { test: (t) => (/thunderbolt[ -]?4/.test(t) ? 'thunderbolt 4' : null) },
   { test: (t) => (/hdmi/.test(t) ? 'hdmi' : null) },
+  { test: (t) => (/displayport|dp\b/.test(t) ? 'displayport' : null) },
   { test: (t) => (/vga/.test(t) ? 'vga' : null) },
   { test: (t) => (/ethernet|rj45|gigabit/.test(t) ? 'ethernet' : null) },
   { test: (t) => (/kortlasare|kortlasare|minneskortlasare|micro ?sd|microsd|sd/.test(t) ? 'sd-kortläsare' : null) },
+  { test: (t) => (/lightning/.test(t) ? 'lightning' : null) },
+  { test: (t) => (/3\.5\s?mm|3,5\s?mm|headphone jack|audio jack/.test(t) ? '3.5mm' : null) },
   { test: (t) => (/qi2/.test(t) ? 'qi2' : null) },
   { test: (t) => (/(^|\b)qi(\b|$)/.test(t) && !/qi2/.test(t) ? 'qi' : null) },
   { test: (t) => (/bluetooth/.test(t) ? 'bluetooth' : null) },
-  { test: (t) => (/wifi/.test(t) ? 'wifi' : null) },
+  { test: (t) => (/wifi|wi-fi/.test(t) ? 'wifi' : null) },
   { test: (t) => (/gan/.test(t) ? 'gan' : null) },
+  { test: (t) => (/power delivery|\busb pd\b|\bpd ?3\.[01]\b|\bpd fast charging\b/.test(t) ? 'power delivery' : null) },
   { test: (t) => (/nvme/.test(t) ? 'nvme' : null) },
   { test: (t) => (/ssd/.test(t) ? 'ssd' : null) },
   { test: (t) => (/magsafe/.test(t) ? 'magsafe' : null) },
-  { test: (t) => (/apple watch/.test(t) ? 'apple watch' : null) },
+];
+
+const bluetoothVersionMatchers: Array<{ pattern: RegExp; tag: string }> = [
+  { pattern: /ble ?5\.4|bluetooth ?5\.4/, tag: 'bluetooth 5.4' },
+  { pattern: /ble ?5\.3|bluetooth ?5\.3/, tag: 'bluetooth 5.3' },
+  { pattern: /ble ?5\.2|bluetooth ?5\.2/, tag: 'bluetooth 5.2' },
+  { pattern: /ble ?5\.1|bluetooth ?5\.1/, tag: 'bluetooth 5.1' },
+  { pattern: /ble ?5\.0|bluetooth ?5\.0/, tag: 'bluetooth 5.0' },
+];
+
+const wifiVersionMatchers: Array<{ pattern: RegExp; tag: string }> = [
+  { pattern: /wi-?fi ?7\b|802\.11be/, tag: 'wifi 7' },
+  { pattern: /wi-?fi ?6e\b/, tag: 'wifi 6e' },
+  { pattern: /wi-?fi ?6\b|802\.11ax/, tag: 'wifi 6' },
+  { pattern: /wi-?fi ?5\b|802\.11ac/, tag: 'wifi 5' },
 ];
 
 const featureMatchers: Array<{ test: (t: string) => string | null }> = [
@@ -159,6 +178,55 @@ function detectLayout(text: string): string | null {
   return null;
 }
 
+function addWirelessVersionTags(text: string, tags: Set<string>) {
+  for (const matcher of bluetoothVersionMatchers) {
+    if (matcher.pattern.test(text)) {
+      tags.add('bluetooth');
+      tags.add(matcher.tag);
+    }
+  }
+
+  for (const matcher of wifiVersionMatchers) {
+    if (matcher.pattern.test(text)) {
+      tags.add('wifi');
+      tags.add(matcher.tag);
+    }
+  }
+}
+
+function addPowerTags(text: string, productType: ProductType, tags: Set<string>) {
+  const allowPowerTags = productType === 'Laddare'
+    || productType === 'Powerbank'
+    || productType === 'Hubb / Adapter'
+    || productType === 'Dockningsstation'
+    || productType === 'Kabel';
+
+  if (!allowPowerTags && !/power delivery|\busb pd\b|\bpd ?3\.[01]\b|charging|ladd/.test(text)) return;
+
+  const watts = text.match(/\b\d{1,3}\s?w\b/g) ?? [];
+  watts.forEach((item) => tags.add(item.replace(/\s+/g, '').toLowerCase()));
+
+  if (/power delivery|\busb pd\b|\bpd ?3\.[01]\b|\bpd fast charging\b/.test(text)) tags.add('power delivery');
+  if (/pd ?3\.1/.test(text)) tags.add('pd 3.1');
+  if (/pd ?3\.0/.test(text)) tags.add('pd 3.0');
+}
+
+function addCableConnectorTags(text: string, productType: ProductType, tags: Set<string>) {
+  if (productType !== 'Kabel' && !/cable|kabel/.test(text)) return;
+
+  const cableMatchers: Array<{ pattern: RegExp; tag: string }> = [
+    { pattern: /usb-c\s*(to|till)\s*usb-c|usb c\s*(to|till)\s*usb c/, tag: 'usb-c till usb-c' },
+    { pattern: /usb-c\s*(to|till)\s*usb-a|usb c\s*(to|till)\s*usb a/, tag: 'usb-c till usb-a' },
+    { pattern: /usb-c\s*(to|till)\s*lightning|usb c\s*(to|till)\s*lightning/, tag: 'usb-c till lightning' },
+    { pattern: /usb-c\s*(to|till)\s*hdmi|usb c\s*(to|till)\s*hdmi/, tag: 'usb-c till hdmi' },
+    { pattern: /hdmi\s*(to|till)\s*hdmi/, tag: 'hdmi till hdmi' },
+  ];
+
+  for (const matcher of cableMatchers) {
+    if (matcher.pattern.test(text)) tags.add(matcher.tag);
+  }
+}
+
 function detectType(text: string): ProductType {
   const mentionsMonitor = /monitor|display|skarm|skarm/.test(text);
   const accessoryContext = /stand|stativ|hub|dock|adapter|hallare|hållare|kabel|cable|mount/.test(text);
@@ -185,22 +253,12 @@ function collectSpecificationTags(text: string, productType: ProductType, settin
     if (hit) tags.add(hit);
   }
 
-  const watts = text.match(/\b\d+\s?w\b/g) ?? [];
-  watts.forEach((item) => tags.add(item.replace(/\s+/g, '').toLowerCase()));
-
-  const lengths = text.match(/\b\d+\s?(cm|m)\b/g) ?? [];
-  lengths.forEach((item) => tags.add(item.replace(/\s+/g, '')));
-
-  const sizes = text.match(/\b(13|14|15\/16|24)\s?tum\b/g) ?? [];
-  sizes.forEach((item) => tags.add(item.replace(/\s+/g, ' ')));
-
-  const color = detectColor(text);
-  if (color) tags.add(color);
+  addWirelessVersionTags(text, tags);
+  addPowerTags(text, productType, tags);
+  addCableConnectorTags(text, productType, tags);
 
   const layout = detectLayout(text);
-  if (layout) tags.add(layout);
-
-  if (productType === 'Monitor') tags.add('monitor');
+  if (layout && (productType === 'Tangentbord' || productType === 'Keypad')) tags.add(layout);
 
   return Array.from(tags).slice(0, settings.maxSpecTags);
 }
