@@ -1,6 +1,11 @@
 {
   "project": "taxonomy-core-scaffold",
   "status": "scaffolded",
+  "database": {
+    "engine": "sqlite",
+    "path": "project-root/storage/taxonomy.sqlite",
+    "tables": ["products", "tags", "product_tag_assignments", "review_queue"]
+  },
   "workflow": [
     {
       "step": 1,

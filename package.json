@@ -7,15 +7,20 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit && vite build",
     "preview": "vite preview",
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "db:init": "node project-root/scripts/init-db.mjs",
+    "db:seed": "node project-root/scripts/seed-db.mjs",
+    "db:reset": "rm -f project-root/storage/taxonomy.sqlite && npm run db:init && npm run db:seed"
   },
   "dependencies": {
+    "better-sqlite3": "^12.9.0",
     "express": "^5.2.1",
     "lucide-react": "^0.511.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
