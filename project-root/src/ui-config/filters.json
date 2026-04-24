@@ -1,0 +1,20 @@
+{
+  "filters": [
+    {
+      "key": "connector",
+      "type": "pills"
+    },
+    {
+      "key": "protocol",
+      "type": "pills"
+    },
+    {
+      "key": "features",
+      "type": "pills"
+    },
+    {
+      "key": "power_watt",
+      "type": "slider"
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "project": "taxonomy-core-scaffold",
+  "status": "scaffolded",
+  "workflow": [
+    {
+      "step": 1,
+      "name": "import",
+      "description": "Importera CSV från leverantor och mappa mot produktschema."
+    },
+    {
+      "step": 2,
+      "name": "ai_enrichment",
+      "description": "Kor tagging prompt och spara strukturerade tags."
+    },
+    {
+      "step": 3,
+      "name": "validation",
+      "description": "Validera schema och flagga missing fields."
+    },
+    {
+      "step": 4,
+      "name": "taxonomy_sync",
+      "description": "Nya taggar gar till review queue innan publish."
+    },
+    {
+      "step": 5,
+      "name": "publish",
+      "description": "Publicera via API till frontend."
+    }
+  ],
+  "governance": {
+    "tag_creation": "admin_approval",
+    "required_fields": ["connector", "power_watt"],
+    "validation_rules": ["no_empty_tags"]
+  },
+  "critical_design_rules": {
+    "avoid": [
+      "blanda connector och feature",
+      "hardkoda vardefalt filterdata i frontend",
+      "tillat fri text utan kontroll"
+    ],
+    "enforce": [
+      "allt via taxonomy",
+      "range values for watt and speed",
+      "separera connector, protocol och feature"
+    ]
+  },
+  "next_codex_commands": [
+    "generate API endpoints",
+    "connect to DB",
+    "create React filter UI"
+  ],
+  "test_filters": {
+    "connector": ["usb_c"],
+    "features": ["ethernet"],
+    "power_watt": {
+      "min": 60
+    }
+  }
+}

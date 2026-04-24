@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "properties": {
+    "connector": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "protocol": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "power_watt": { "type": "number" },
+    "features": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["approved", "pending_approval", "admin_review"]
+    }
+  }
+}

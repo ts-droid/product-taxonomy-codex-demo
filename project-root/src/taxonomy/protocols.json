@@ -1,0 +1,8 @@
+{
+  "protocols": [
+    { "id": "usb2", "speed": 480 },
+    { "id": "usb3", "speed": 5000 },
+    { "id": "usb4", "speed": 40000 },
+    { "id": "thunderbolt", "speed": 40000 }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "connectors": [
+    { "id": "usb_c", "name": "USB-C", "type": "physical" },
+    { "id": "usb_a", "name": "USB-A", "type": "physical" },
+    { "id": "hdmi", "name": "HDMI", "type": "physical" },
+    { "id": "displayport", "name": "DisplayPort", "type": "physical" },
+    { "id": "rj45", "name": "Ethernet (RJ45)", "type": "physical" },
+    { "id": "sd", "name": "SD Card", "type": "physical" }
+  ]
+}

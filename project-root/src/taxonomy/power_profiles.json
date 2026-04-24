@@ -1,0 +1,9 @@
+{
+  "power_profiles": [
+    { "id": "pd_30w", "min_watt": 30, "max_watt": 30, "technology": ["power_delivery"] },
+    { "id": "pd_45w", "min_watt": 45, "max_watt": 45, "technology": ["power_delivery"] },
+    { "id": "pd_60w", "min_watt": 60, "max_watt": 60, "technology": ["power_delivery"] },
+    { "id": "pd_100w", "min_watt": 100, "max_watt": 100, "technology": ["power_delivery", "fast_charge"] },
+    { "id": "gan_100w", "min_watt": 100, "max_watt": 100, "technology": ["power_delivery", "fast_charge", "gan"] }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "features": [
+    "ethernet",
+    "power_delivery",
+    "video_output",
+    "fast_charge",
+    "sd_reader"
+  ]
+}

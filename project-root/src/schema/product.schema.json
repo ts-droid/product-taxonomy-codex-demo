@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "required": ["id", "name", "tags"],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "tags": {
+      "type": "object",
+      "properties": {
+        "connector": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "protocol": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "power_watt": { "type": "number" },
+        "features": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

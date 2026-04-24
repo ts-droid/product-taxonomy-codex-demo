@@ -1,0 +1,21 @@
+[
+  {
+    "id": "demo_hub_001",
+    "name": "USB-C Multiport Hub",
+    "tags": {
+      "connector": ["usb_c", "hdmi", "rj45", "sd"],
+      "protocol": ["usb3"],
+      "power_watt": 100,
+      "features": ["ethernet", "power_delivery", "video_output", "sd_reader"]
+    }
+  },
+  {
+    "id": "demo_charger_001",
+    "name": "GaN Charger 100W",
+    "tags": {
+      "connector": ["usb_c"],
+      "power_watt": 100,
+      "features": ["power_delivery", "fast_charge"]
+    }
+  }
+]
