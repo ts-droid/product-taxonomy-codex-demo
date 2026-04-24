@@ -20,7 +20,15 @@ import { Badge } from './components/Badge';
 import { StatCard } from './components/StatCard';
 import { DEFAULT_RAW_URLS, DEFAULT_REFERENCES, DEFAULT_SETTINGS } from './lib/demoData';
 import { buildTaxonomy, parseProducts, type Product, type Settings } from './lib/catalog';
-import { buildTaggingPrompt, parseImportedProducts, type ImportedRawSource, type RawImportFailure } from './lib/rawPipeline';
+import {
+  buildTaggingPrompt,
+  matchReferenceSources,
+  parseImportedProducts,
+  type ImportedRawSource,
+  type ImportedReferenceSource,
+  type RawImportFailure,
+  type ReferenceImportFailure,
+} from './lib/rawPipeline';
 
 const ALL_IN_MAIN = '__ALL_IN_MAIN__';
 
@@ -77,6 +85,8 @@ export default function App() {
   const [applied, setApplied] = useState({ rawUrls: DEFAULT_RAW_URLS, references: DEFAULT_REFERENCES, settings: DEFAULT_SETTINGS });
   const [importedSources, setImportedSources] = useState<ImportedRawSource[]>([]);
   const [importFailures, setImportFailures] = useState<RawImportFailure[]>([]);
+  const [importedReferences, setImportedReferences] = useState<ImportedReferenceSource[]>([]);
+  const [referenceFailures, setReferenceFailures] = useState<ReferenceImportFailure[]>([]);
   const [importStatus, setImportStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [importedAt, setImportedAt] = useState<string | null>(null);
   const [importMessage, setImportMessage] = useState('');
@@ -100,9 +110,30 @@ export default function App() {
     [importedSources, selectedPromptSourceId]
   );
   const promptPreview = useMemo(
-    () => (promptSource ? buildTaggingPrompt(promptSource, applied.settings) : ''),
-    [promptSource, applied.settings]
+    () => (promptSource ? buildTaggingPrompt(promptSource, applied.settings, importedReferences) : ''),
+    [promptSource, applied.settings, importedReferences]
   );
+  const matchedPromptReferences = useMemo(
+    () => (promptSource ? matchReferenceSources(promptSource, importedReferences, 3) : []),
+    [promptSource, importedReferences]
+  );
+  const referenceMatchesByProduct = useMemo(() => {
+    const entries = products.map((product) => {
+      const source = importedSources.find((item) => item.id === product.id) ?? {
+        id: product.id,
+        rawUrl: product.rawUrl,
+        slug: product.slug,
+        sourceTitle: product.title,
+        rawText: product.searchText,
+        highlightLines: [],
+        specificationLines: [],
+        excerpt: product.searchText,
+        fetchedAt: '',
+      };
+      return [product.id, matchReferenceSources(source, importedReferences, 2)] as const;
+    });
+    return new Map(entries);
+  }, [products, importedSources, importedReferences]);
 
   useEffect(() => {
     if (!taxonomy.mainGroups.length) return;
@@ -149,6 +180,8 @@ export default function App() {
     setApplied({ rawUrls: draftRawUrls, references: draftReferences, settings: { ...draftSettings } });
     setImportedSources([]);
     setImportFailures([]);
+    setImportedReferences([]);
+    setReferenceFailures([]);
     setImportStatus('idle');
     setImportedAt(null);
     setImportMessage('');
@@ -166,13 +199,14 @@ export default function App() {
     setApplied(nextApplied);
     setImportStatus('loading');
     setImportFailures([]);
+    setReferenceFailures([]);
     setImportMessage('');
 
     try {
       const response = await fetch('/api/import-raw', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ rawUrls: nextApplied.rawUrls }),
+        body: JSON.stringify({ rawUrls: nextApplied.rawUrls, references: nextApplied.references }),
       });
 
       if (!response.ok) {
@@ -180,15 +214,24 @@ export default function App() {
         throw new Error(data?.error ?? `Importen misslyckades (${response.status})`);
       }
 
-      const data = await response.json() as { importedAt: string; sources: ImportedRawSource[]; failures: RawImportFailure[] };
+      const data = await response.json() as {
+        importedAt: string;
+        sources: ImportedRawSource[];
+        failures: RawImportFailure[];
+        referenceSources: ImportedReferenceSource[];
+        referenceFailures: ReferenceImportFailure[];
+      };
       setImportedSources(data.sources);
       setImportFailures(data.failures ?? []);
+      setImportedReferences(data.referenceSources ?? []);
+      setReferenceFailures(data.referenceFailures ?? []);
       setImportedAt(data.importedAt);
       setImportStatus(data.sources.length ? 'success' : 'error');
-      setImportMessage(data.sources.length ? 'RAW-innehåll inläst från källsidorna.' : 'Ingen RAW-data kunde importeras.');
+      setImportMessage(data.sources.length ? 'RAW-innehåll och referenskontext inläst från källsidorna.' : 'Ingen RAW-data kunde importeras.');
       setSelectedPromptSourceId(data.sources[0]?.id ?? null);
     } catch (error) {
       setImportedSources([]);
+      setImportedReferences([]);
       setImportStatus('error');
       setImportMessage(error instanceof Error ? error.message : 'Okänt importfel');
     }
@@ -212,7 +255,7 @@ export default function App() {
         <StatCard label="Produkter" value={products.length} sublabel="unika RAW-länkar" icon={Database} />
         <StatCard label="Huvudgrupper" value={taxonomy.mainGroups.length} sublabel="skapade vid senaste byggning" icon={FolderTree} />
         <StatCard label="Källdata" value={importedSources.length ? 'RAW' : 'Slug'} sublabel={importedSources.length ? `${importedSources.length} produkter lästa från råinnehåll` : 'fallback till URL/slugs'} icon={Download} />
-        <StatCard label="Referens-URL:er" value={references.length} sublabel="för benchmark/vidare logik" icon={Link2} />
+        <StatCard label="Referens-URL:er" value={references.length} sublabel={importedReferences.length ? `${importedReferences.length} referenser inlästa` : 'för benchmark/vidare logik'} icon={Link2} />
       </div>
 
       {mode === 'admin' ? (
@@ -251,6 +294,18 @@ export default function App() {
                     </div>
                   </div>
                 )}
+                {!!referenceFailures.length && (
+                  <div className="warning-box">
+                    <strong>Misslyckade referenser</strong>
+                    <div className="list-stack compact">
+                      {referenceFailures.map((failure) => (
+                        <div key={failure.referenceUrl} className="row-item small">
+                          {failure.referenceUrl} - {failure.error}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="split-grid">
                 <div>
@@ -275,7 +330,7 @@ export default function App() {
               </div>
               <div className="info-box">
                 <strong>Hur pipeline:n fungerar nu</strong>
-                <p>Utan import körs en snabb slug-baserad fallback. Efter RAW-import bygger appen taggarna på titel, specifikationsrader, highlights och övrig text från produktsidan.</p>
+                <p>Utan import körs en snabb slug-baserad fallback. Efter RAW-import bygger appen taggarna på titel, specifikationsrader, highlights och övrig text från produktsidan. Externa referenser hämtas också och används som benchmarkkontext i prompt-preview och referensmatchning.</p>
               </div>
             </Section>
 
@@ -322,6 +377,21 @@ export default function App() {
                     <strong>Källsammanfattning</strong>
                     <p>{promptSource?.excerpt}</p>
                   </div>
+                  <div className="info-box">
+                    <strong>Matchade referenser</strong>
+                    {matchedPromptReferences.length ? (
+                      <div className="list-stack compact">
+                        {matchedPromptReferences.map((reference) => (
+                          <div className="row-item" key={reference.referenceUrl}>
+                            <strong>{reference.title}</strong>
+                            <div className="muted small">{reference.matchedTerms.join(', ') || 'allmän benchmarkmatch'}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p>Inga tydliga referenser matchade den här produkten ännu.</p>
+                    )}
+                  </div>
                   <div className="field-stack">
                     <label>Prompt</label>
                     <textarea className="code-area" readOnly value={promptPreview} />
@@ -361,6 +431,16 @@ export default function App() {
                       <div className="subheading">Relaterade produkter</div>
                       <div className="pill-row">{product.recommendationMatches.length ? product.recommendationMatches.map((item) => <span className="mini-tag linked" key={`${product.id}-${item.productId}-${item.target}`}>{item.title}</span>) : <span className="muted small">Inga matchade relaterade produkter</span>}</div>
                     </div>
+                    {!!importedReferences.length && (
+                      <div className="meta-block">
+                        <div className="subheading">Matchade referenser</div>
+                        <div className="pill-row">
+                          {(referenceMatchesByProduct.get(product.id) ?? []).length
+                            ? (referenceMatchesByProduct.get(product.id) ?? []).map((reference) => <span className="mini-tag soft" key={`${product.id}-${reference.referenceUrl}`}>{reference.title}</span>)
+                            : <span className="muted small">Ingen tydlig referensmatch</span>}
+                        </div>
+                      </div>
+                    )}
                   </article>
                 ))}
               </div>

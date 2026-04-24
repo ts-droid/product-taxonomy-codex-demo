@@ -12,8 +12,22 @@ export type ImportedRawSource = {
   fetchedAt: string;
 };
 
+export type ImportedReferenceSource = {
+  id: number;
+  referenceUrl: string;
+  title: string;
+  excerpt: string;
+  keywords: string[];
+  fetchedAt: string;
+};
+
 export type RawImportFailure = {
   rawUrl: string;
+  error: string;
+};
+
+export type ReferenceImportFailure = {
+  referenceUrl: string;
   error: string;
 };
 
@@ -78,6 +92,13 @@ function normalize(text: string): string {
     .replace(/_/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function tokenize(text: string): string[] {
+  return normalize(text)
+    .split(/[^a-z0-9]+/i)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
 }
 
 function detectSeries(text: string): string | null {
@@ -272,6 +293,33 @@ function sourceSearchText(source: ImportedRawSource): string {
   ].join(' '));
 }
 
+function referenceSearchText(reference: ImportedReferenceSource): string {
+  return normalize([
+    reference.title,
+    reference.keywords.join(' '),
+    reference.excerpt,
+  ].join(' '));
+}
+
+export function matchReferenceSources(source: ImportedRawSource, references: ImportedReferenceSource[], maxMatches = 3) {
+  const sourceTokens = new Set(tokenize(sourceSearchText(source)));
+
+  return references
+    .map((reference) => {
+      const referenceTokens = Array.from(new Set(tokenize(referenceSearchText(reference))));
+      const overlap = referenceTokens.filter((token) => sourceTokens.has(token));
+      const score = overlap.length;
+      return {
+        ...reference,
+        score,
+        matchedTerms: overlap.slice(0, 8),
+      };
+    })
+    .filter((reference) => reference.score > 0)
+    .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, 'sv'))
+    .slice(0, maxMatches);
+}
+
 export function parseImportedProducts(sources: ImportedRawSource[], settings: Settings): Product[] {
   const base = sources.map((source, index) => {
     const searchText = sourceSearchText(source);
@@ -318,7 +366,7 @@ export function parseImportedProducts(sources: ImportedRawSource[], settings: Se
   }));
 }
 
-export function buildTaggingPrompt(source: ImportedRawSource, settings: Settings): string {
+export function buildTaggingPrompt(source: ImportedRawSource, settings: Settings, references: ImportedReferenceSource[] = []): string {
   const specificationLines = source.specificationLines.length
     ? source.specificationLines.map((line) => `- ${line}`).join('\n')
     : '- Inga explicita specifikationsrader hittades';
@@ -326,6 +374,13 @@ export function buildTaggingPrompt(source: ImportedRawSource, settings: Settings
   const highlightLines = source.highlightLines.length
     ? source.highlightLines.map((line) => `- ${line}`).join('\n')
     : '- Inga separata highlight-rader hittades';
+
+  const matchedReferences = matchReferenceSources(source, references, 3);
+  const referenceContext = matchedReferences.length
+    ? matchedReferences.map((reference) => `- ${reference.title} (${reference.referenceUrl})
+  matchedTerms: ${reference.matchedTerms.join(', ') || 'inga explicita matchningar'}
+  excerpt: ${reference.excerpt}`).join('\n')
+    : '- Inga relevanta externa referenser matchade den här produkten';
 
   return `Du klassificerar en e-handelsprodukt utifrån verkligt RAW-innehåll.
 
@@ -338,6 +393,7 @@ Mål:
 Viktiga regler:
 - använd bara fakta som stöds av RAW-innehållet
 - prioritera explicita specs före marknadsföringstext
+- använd externa referenser som benchmark och normaliseringsstöd, men låt aldrig referenser överskriva tydliga fakta i produktens egna RAW-data
 - specificationTags ska vara korta, normaliserade och konkreta
 - featureTags ska beskriva användningsfall, egenskaper eller kontext
 - max ${settings.maxSpecTags} specificationTags
@@ -370,6 +426,9 @@ ${highlightLines}
 
 specificationLines:
 ${specificationLines}
+
+referenceContext:
+${referenceContext}
 
 rawExcerpt:
 ${source.excerpt}`;

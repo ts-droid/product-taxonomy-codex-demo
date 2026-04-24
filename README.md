@@ -40,6 +40,7 @@ Projektet innehåller `railway.json` och en liten Node-server som både:
 
 - serverar den byggda `dist/`-appen
 - exponerar `/api/import-raw` för att hämta verkligt RAW-innehåll från produktsidor
+- hämtar externa referens-URL:er som benchmarkkontext
 - exponerar `/api/health` för Railways healthcheck
 
 ```bash

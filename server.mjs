@@ -178,6 +178,25 @@ function collectDescriptionHighlights(text) {
   return bullets.slice(0, 8);
 }
 
+function collectKeywords(text, maxKeywords = 12) {
+  const stopwords = new Set([
+    'the', 'and', 'for', 'with', 'that', 'this', 'from', 'your', 'you', 'are', 'but', 'not',
+    'att', 'och', 'med', 'som', 'det', 'den', 'har', 'för', 'till', 'från', 'eller', 'på',
+    'product', 'products', 'plaud', 'satechi', 'apple',
+  ]);
+
+  const freq = new Map();
+  for (const token of text.toLowerCase().match(/[a-z0-9åäö-]{3,}/g) ?? []) {
+    if (stopwords.has(token)) continue;
+    freq.set(token, (freq.get(token) || 0) + 1);
+  }
+
+  return [...freq.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, maxKeywords)
+    .map(([token]) => token);
+}
+
 function isBlockedHostname(hostname) {
   const host = hostname.toLowerCase();
   if (host === 'localhost' || host === '0.0.0.0' || host === '::1' || host.endsWith('.local')) return true;
@@ -254,13 +273,65 @@ async function fetchRawSource(url, index) {
   }
 }
 
+async function fetchReferenceSource(url, index) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error('Ogiltig URL');
+  }
+
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Endast http/https stöds');
+  if (isBlockedHostname(parsed.hostname)) throw new Error('Privata eller lokala adresser blockeras');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+
+  try {
+    const response = await fetch(parsed, {
+      headers: {
+        'user-agent': 'product-taxonomy-codex-demo/1.0',
+        accept: 'text/html, text/plain;q=0.9, */*;q=0.1',
+      },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const html = await response.text();
+    const structured = extractStructuredProduct(html);
+    const metaDescription = extractMetaContent(html, 'description', 'name');
+    const title = structured?.name || extractTitle(html, parsed.hostname);
+    const text = stripHtml(html);
+    const focusedText = [title, metaDescription, structured?.description, text].filter(Boolean).join('\n\n');
+
+    return {
+      id: index + 1,
+      referenceUrl: url,
+      title,
+      excerpt: excerpt(focusedText, 600),
+      keywords: collectKeywords(focusedText),
+      fetchedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Timeout vid hämtning av referenssidan');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, now: new Date().toISOString() });
 });
 
 app.post('/api/import-raw', async (req, res) => {
   const rawUrls = String(req.body?.rawUrls ?? '');
+  const referenceUrls = String(req.body?.references ?? '');
   const urls = Array.from(new Set(rawUrls.split(/\n+/).map((value) => value.trim()).filter(Boolean))).slice(0, 50);
+  const references = Array.from(new Set(referenceUrls.split(/\n+/).map((value) => value.trim()).filter(Boolean))).slice(0, 20);
 
   if (!urls.length) {
     return res.status(400).json({ error: 'Ingen RAW-länk skickades in.' });
@@ -268,6 +339,8 @@ app.post('/api/import-raw', async (req, res) => {
 
   const sources = [];
   const failures = [];
+  const referenceSources = [];
+  const referenceFailures = [];
 
   for (const [index, url] of urls.entries()) {
     try {
@@ -280,10 +353,23 @@ app.post('/api/import-raw', async (req, res) => {
     }
   }
 
+  for (const [index, url] of references.entries()) {
+    try {
+      referenceSources.push(await fetchReferenceSource(url, index));
+    } catch (error) {
+      referenceFailures.push({
+        referenceUrl: url,
+        error: error instanceof Error ? error.message : 'Okänt fel vid hämtning',
+      });
+    }
+  }
+
   return res.json({
     importedAt: new Date().toISOString(),
     sources,
     failures,
+    referenceSources,
+    referenceFailures,
   });
 });
 
