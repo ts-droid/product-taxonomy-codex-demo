@@ -197,6 +197,16 @@ function collectKeywords(text, maxKeywords = 12) {
     .map(([token]) => token);
 }
 
+function detectReferenceSourceType(url, text) {
+  const pathname = url.pathname.toLowerCase();
+  const haystack = `${pathname}\n${text.toLowerCase()}`;
+  if (/\/products?\//.test(pathname) || /\b(product|specifications|what'?s included)\b/.test(haystack)) return 'product';
+  if (/\/collections?\//.test(pathname) || /\/categories?\//.test(pathname) || /\b(collection|category|shop all)\b/.test(haystack)) return 'category';
+  if (/\/support\//.test(pathname) || /\/faq/.test(pathname) || /\/help\//.test(pathname) || /\b(faq|support|guide|manual)\b/.test(haystack)) return 'support';
+  if (pathname === '/' || pathname === '') return 'brand';
+  return 'unknown';
+}
+
 function isBlockedHostname(hostname) {
   const host = hostname.toLowerCase();
   if (host === 'localhost' || host === '0.0.0.0' || host === '::1' || host.endsWith('.local')) return true;
@@ -303,14 +313,22 @@ async function fetchReferenceSource(url, index) {
     const metaDescription = extractMetaContent(html, 'description', 'name');
     const title = structured?.name || extractTitle(html, parsed.hostname);
     const text = stripHtml(html);
-    const focusedText = [title, metaDescription, structured?.description, text].filter(Boolean).join('\n\n');
+    const lines = makeLines(text);
+    const highlightLines = structured?.description
+      ? collectDescriptionHighlights(structured.description)
+      : collectHighlightLines(lines);
+    const sourceType = detectReferenceSourceType(parsed, [title, metaDescription, structured?.description, text].filter(Boolean).join('\n'));
+    const focusedText = [title, metaDescription, structured?.description, highlightLines.join('\n'), text].filter(Boolean).join('\n\n');
 
     return {
       id: index + 1,
       referenceUrl: url,
       title,
+      domain: parsed.hostname,
+      sourceType,
       excerpt: excerpt(focusedText, 600),
       keywords: collectKeywords(focusedText),
+      highlightLines,
       fetchedAt: new Date().toISOString(),
     };
   } catch (error) {

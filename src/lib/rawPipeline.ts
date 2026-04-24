@@ -16,8 +16,11 @@ export type ImportedReferenceSource = {
   id: number;
   referenceUrl: string;
   title: string;
+  domain: string;
+  sourceType: 'product' | 'category' | 'support' | 'brand' | 'unknown';
   excerpt: string;
   keywords: string[];
+  highlightLines: string[];
   fetchedAt: string;
 };
 
@@ -295,13 +298,21 @@ function sourceSearchText(source: ImportedRawSource): string {
 
 function referenceSearchText(reference: ImportedReferenceSource): string {
   return normalize([
+    reference.domain,
+    reference.sourceType,
     reference.title,
     reference.keywords.join(' '),
+    reference.highlightLines.join(' '),
     reference.excerpt,
   ].join(' '));
 }
 
-export function matchReferenceSources(source: ImportedRawSource, references: ImportedReferenceSource[], maxMatches = 3) {
+export type MatchedReferenceSource = ImportedReferenceSource & {
+  score: number;
+  matchedTerms: string[];
+};
+
+export function matchReferenceSources(source: ImportedRawSource, references: ImportedReferenceSource[], maxMatches = 3): MatchedReferenceSource[] {
   const sourceTokens = new Set(tokenize(sourceSearchText(source)));
 
   return references
@@ -318,6 +329,26 @@ export function matchReferenceSources(source: ImportedRawSource, references: Imp
     .filter((reference) => reference.score > 0)
     .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, 'sv'))
     .slice(0, maxMatches);
+}
+
+function formatBulletLines(lines: string[], fallback: string): string {
+  return lines.length
+    ? lines.map((line) => `- ${line}`).join('\n')
+    : `- ${fallback}`;
+}
+
+function formatReferenceContext(source: ImportedRawSource, references: ImportedReferenceSource[], maxMatches = 3): string {
+  const matchedReferences = matchReferenceSources(source, references, maxMatches);
+  return matchedReferences.length
+    ? matchedReferences.map((reference) => `- ${reference.title} (${reference.referenceUrl})
+  domain: ${reference.domain}
+  sourceType: ${reference.sourceType}
+  matchedTerms: ${reference.matchedTerms.join(', ') || 'inga explicita matchningar'}
+  keywords: ${reference.keywords.join(', ') || 'inga extraherade nyckelord'}
+  highlights:
+${formatBulletLines(reference.highlightLines, 'Inga separata highlight-rader hittades').replace(/^/gm, '    ')}
+  excerpt: ${reference.excerpt}`).join('\n')
+    : '- Inga relevanta externa referenser matchade den här produkten';
 }
 
 export function parseImportedProducts(sources: ImportedRawSource[], settings: Settings): Product[] {
@@ -366,25 +397,14 @@ export function parseImportedProducts(sources: ImportedRawSource[], settings: Se
   }));
 }
 
-export function buildTaggingPrompt(source: ImportedRawSource, settings: Settings, references: ImportedReferenceSource[] = []): string {
-  const specificationLines = source.specificationLines.length
-    ? source.specificationLines.map((line) => `- ${line}`).join('\n')
-    : '- Inga explicita specifikationsrader hittades';
+export function buildRawExtractionPrompt(source: ImportedRawSource, settings: Settings): string {
+  const specificationLines = formatBulletLines(source.specificationLines, 'Inga explicita specifikationsrader hittades');
+  const highlightLines = formatBulletLines(source.highlightLines, 'Inga separata highlight-rader hittades');
 
-  const highlightLines = source.highlightLines.length
-    ? source.highlightLines.map((line) => `- ${line}`).join('\n')
-    : '- Inga separata highlight-rader hittades';
-
-  const matchedReferences = matchReferenceSources(source, references, 3);
-  const referenceContext = matchedReferences.length
-    ? matchedReferences.map((reference) => `- ${reference.title} (${reference.referenceUrl})
-  matchedTerms: ${reference.matchedTerms.join(', ') || 'inga explicita matchningar'}
-  excerpt: ${reference.excerpt}`).join('\n')
-    : '- Inga relevanta externa referenser matchade den här produkten';
-
-  return `Du klassificerar en e-handelsprodukt utifrån verkligt RAW-innehåll.
+  return `Du extraherar produktfakta från en e-handelsprodukts egen RAW-källa.
 
 Mål:
+- identifiera verifierbara fakta från produktens egen sida
 - identifiera productType
 - föreslå mainCategory och subCategory
 - extrahera specificationTags för filtrering
@@ -393,7 +413,7 @@ Mål:
 Viktiga regler:
 - använd bara fakta som stöds av RAW-innehållet
 - prioritera explicita specs före marknadsföringstext
-- använd externa referenser som benchmark och normaliseringsstöd, men låt aldrig referenser överskriva tydliga fakta i produktens egna RAW-data
+- ignorera externa referenser helt i detta steg
 - specificationTags ska vara korta, normaliserade och konkreta
 - featureTags ska beskriva användningsfall, egenskaper eller kontext
 - max ${settings.maxSpecTags} specificationTags
@@ -412,7 +432,8 @@ Returnera JSON i detta schema:
   "featureTags": ["string"],
   "reasoning": {
     "evidenceLines": ["string"],
-    "notes": "kort förklaring"
+    "notes": "kort förklaring",
+    "uncertainFields": ["string"]
   }
 }
 
@@ -432,4 +453,66 @@ ${referenceContext}
 
 rawExcerpt:
 ${source.excerpt}`;
+}
+
+export function buildReferenceSupportPrompt(source: ImportedRawSource, settings: Settings, references: ImportedReferenceSource[] = []): string {
+  const referenceContext = formatReferenceContext(source, references, 4);
+  const specificationLines = formatBulletLines(source.specificationLines, 'Inga explicita specifikationsrader hittades');
+  const highlightLines = formatBulletLines(source.highlightLines, 'Inga separata highlight-rader hittades');
+
+  return `Du analyserar externa referenssidor som sekundärt stöd för en produktklassificering.
+
+Mål:
+- normalisera kategori- och taggvokabulär mot tillverkarsida, supportsida eller annan referenskälla
+- föreslå vilka specifikationer och featureTags som verkar återkomma i relaterade referenser
+- hitta eventuella benämningar, synonymgrupper och kategorispråk som kan hjälpa slutlig klassificering
+
+Viktiga regler:
+- produktens egen RAW-källa är primär sanning
+- externa referenser får bara stärka, normalisera eller förtydliga sådant som redan antyds i RAW-källan
+- om en referens motsäger tydliga fakta i RAW-källan ska du markera konflikten i stället för att skriva över produktfakta
+- prioritera referenser med hög term-matchning och tydlig produktsläktskap
+- max ${settings.maxSpecTags} canonicalSpecificationTags
+- max ${settings.maxFeatureTags} canonicalFeatureTags
+
+Returnera JSON i detta schema:
+{
+  "referenceConfidence": "low | medium | high",
+  "recommendedProductType": "string | null",
+  "recommendedMainCategory": "string | null",
+  "recommendedSubCategory": "string | null",
+  "canonicalSpecificationTags": ["string"],
+  "canonicalFeatureTags": ["string"],
+  "supportingReferences": [
+    {
+      "title": "string",
+      "url": "string",
+      "whyItMatches": "string"
+    }
+  ],
+  "conflicts": ["string"],
+  "notes": "kort sammanfattning"
+}
+
+PRIMARY PRODUCT SNAPSHOT
+rawUrl: ${source.rawUrl}
+slug: ${source.slug}
+title: ${source.sourceTitle}
+
+highlightLines:
+${highlightLines}
+
+specificationLines:
+${specificationLines}
+
+REFERENCE CONTEXT
+${referenceContext}`;
+}
+
+export function buildTaggingPrompt(source: ImportedRawSource, settings: Settings, references: ImportedReferenceSource[] = []): string {
+  return `PROMPT 1: RAW EXTRACTION
+${buildRawExtractionPrompt(source, settings)}
+
+PROMPT 2: REFERENCE SUPPORT
+${buildReferenceSupportPrompt(source, settings, references)}`;
 }

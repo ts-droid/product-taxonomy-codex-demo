@@ -21,7 +21,8 @@ import { StatCard } from './components/StatCard';
 import { DEFAULT_RAW_URLS, DEFAULT_REFERENCES, DEFAULT_SETTINGS } from './lib/demoData';
 import { buildTaxonomy, parseProducts, type Product, type Settings } from './lib/catalog';
 import {
-  buildTaggingPrompt,
+  buildRawExtractionPrompt,
+  buildReferenceSupportPrompt,
   matchReferenceSources,
   parseImportedProducts,
   type ImportedRawSource,
@@ -109,8 +110,12 @@ export default function App() {
     () => importedSources.find((source) => source.id === selectedPromptSourceId) ?? importedSources[0] ?? null,
     [importedSources, selectedPromptSourceId]
   );
-  const promptPreview = useMemo(
-    () => (promptSource ? buildTaggingPrompt(promptSource, applied.settings, importedReferences) : ''),
+  const rawPromptPreview = useMemo(
+    () => (promptSource ? buildRawExtractionPrompt(promptSource, applied.settings) : ''),
+    [promptSource, applied.settings]
+  );
+  const referencePromptPreview = useMemo(
+    () => (promptSource ? buildReferenceSupportPrompt(promptSource, applied.settings, importedReferences) : ''),
     [promptSource, applied.settings, importedReferences]
   );
   const matchedPromptReferences = useMemo(
@@ -330,7 +335,7 @@ export default function App() {
               </div>
               <div className="info-box">
                 <strong>Hur pipeline:n fungerar nu</strong>
-                <p>Utan import körs en snabb slug-baserad fallback. Efter RAW-import bygger appen taggarna på titel, specifikationsrader, highlights och övrig text från produktsidan. Externa referenser hämtas också och används som benchmarkkontext i prompt-preview och referensmatchning.</p>
+                <p>Utan import körs en snabb slug-baserad fallback. Efter RAW-import bygger appen taggarna på titel, specifikationsrader, highlights och övrig text från produktsidan. Externa referenser hämtas också och används som sekundär benchmarkkontext via en separat referens-prompt, så att produktens egen RAW-källa fortsätter vara primär.</p>
               </div>
             </Section>
 
@@ -362,7 +367,7 @@ export default function App() {
               </div>
             </Section>
 
-            <Section title="Prompt-preview" subtitle="Visar prompten som kan skickas till en LLM för vald produkt efter RAW-import." icon={BrainCircuit} right={importedSources.length ? <Badge tone="accent">LLM-ready</Badge> : <Badge tone="warning">Import krävs</Badge>}>
+            <Section title="Prompt-preview" subtitle="Visar nu två separata promptar: en för RAW-extraktion och en för extern referensanalys." icon={BrainCircuit} right={importedSources.length ? <Badge tone="accent">LLM-ready</Badge> : <Badge tone="warning">Import krävs</Badge>}>
               {importedSources.length ? (
                 <>
                   <div className="field-stack">
@@ -378,12 +383,17 @@ export default function App() {
                     <p>{promptSource?.excerpt}</p>
                   </div>
                   <div className="info-box">
+                    <strong>Promptstrategi</strong>
+                    <p>Steg 1 använder bara produktens egen RAW-sida för att extrahera fakta och preliminära taggar. Steg 2 använder matchade externa referenser för att normalisera benämningar, kategorier och taggvokabulär utan att skriva över tydliga produktfakta.</p>
+                  </div>
+                  <div className="info-box">
                     <strong>Matchade referenser</strong>
                     {matchedPromptReferences.length ? (
                       <div className="list-stack compact">
                         {matchedPromptReferences.map((reference) => (
                           <div className="row-item" key={reference.referenceUrl}>
                             <strong>{reference.title}</strong>
+                            <div className="muted small">{reference.domain} · {reference.sourceType}</div>
                             <div className="muted small">{reference.matchedTerms.join(', ') || 'allmän benchmarkmatch'}</div>
                           </div>
                         ))}
@@ -393,12 +403,16 @@ export default function App() {
                     )}
                   </div>
                   <div className="field-stack">
-                    <label>Prompt</label>
-                    <textarea className="code-area" readOnly value={promptPreview} />
+                    <label>RAW-prompt</label>
+                    <textarea className="code-area" readOnly value={rawPromptPreview} />
+                  </div>
+                  <div className="field-stack">
+                    <label>Referens-prompt</label>
+                    <textarea className="code-area" readOnly value={referencePromptPreview} />
                   </div>
                 </>
               ) : (
-                <div className="empty">Ingen prompt-preview ännu. Kör först RAW-import så att prompten baseras på verkligt produktinnehåll i stället för bara sluggen.</div>
+                <div className="empty">Ingen prompt-preview ännu. Kör först RAW-import så att promptarna baseras på verkligt produktinnehåll och matchade externa referenser i stället för bara sluggen.</div>
               )}
             </Section>
 
@@ -436,7 +450,7 @@ export default function App() {
                         <div className="subheading">Matchade referenser</div>
                         <div className="pill-row">
                           {(referenceMatchesByProduct.get(product.id) ?? []).length
-                            ? (referenceMatchesByProduct.get(product.id) ?? []).map((reference) => <span className="mini-tag soft" key={`${product.id}-${reference.referenceUrl}`}>{reference.title}</span>)
+                            ? (referenceMatchesByProduct.get(product.id) ?? []).map((reference) => <span className="mini-tag soft" key={`${product.id}-${reference.referenceUrl}`}>{reference.title} · {reference.sourceType}</span>)
                             : <span className="muted small">Ingen tydlig referensmatch</span>}
                         </div>
                       </div>
