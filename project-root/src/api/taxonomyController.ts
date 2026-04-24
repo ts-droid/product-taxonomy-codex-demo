@@ -25,7 +25,7 @@ export function getStoredTaxonomyTags(tagKey?: string) {
 }
 
 export function queueCandidateTag(input: {
-  productId?: string;
+  sourceRef?: string;
   tagKey: string;
   tagValue: string;
   reason: string;

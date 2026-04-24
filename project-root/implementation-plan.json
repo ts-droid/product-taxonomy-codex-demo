@@ -4,7 +4,8 @@
   "database": {
     "engine": "sqlite",
     "path": "project-root/storage/taxonomy.sqlite",
-    "tables": ["products", "tags", "product_tag_assignments", "review_queue"]
+    "purpose": "master taxonomy and approved base tags only",
+    "tables": ["tags", "review_queue"]
   },
   "workflow": [
     {
