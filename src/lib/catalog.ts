@@ -12,6 +12,7 @@ export type ProductType =
   | 'Mus'
   | 'Tangentbord'
   | 'Keypad'
+  | 'Röstinspelare / AI-note taker'
   | 'Powerbank'
   | 'Laddare'
   | 'Dockningsstation'
@@ -124,7 +125,14 @@ function toDisplayTitle(slug: string): string {
 }
 
 function extractSlug(url: string): string {
-  return url.match(/\/products\/([^/?#]+)\/raw/i)?.[1] ?? '';
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.split('/').map((part) => decodeURIComponent(part)).filter(Boolean);
+    const cleaned = parts.filter((part) => !/^raw$/i.test(part));
+    return cleaned.at(-1)?.trim() ?? '';
+  } catch {
+    return url.match(/\/products\/([^/?#]+)\/raw/i)?.[1] ?? '';
+  }
 }
 
 function detectSeries(text: string): string | null {
@@ -158,6 +166,7 @@ function detectType(text: string): ProductType {
   if (/mouse|mus/.test(text)) return 'Mus';
   if (/keypad|numerisk/.test(text)) return 'Keypad';
   if (/keyboard|tangentbord/.test(text)) return 'Tangentbord';
+  if (/voice recorder|rostinspelare|röstinspelare|ai note taker|note taker|transcrib|transkrib|recording mode|speaker labels/.test(text)) return 'Röstinspelare / AI-note taker';
   if (/powerbank/.test(text)) return 'Powerbank';
   if (/charger|laddare|charging/.test(text)) return 'Laddare';
   if (/dock|dockningsstation/.test(text)) return 'Dockningsstation';
@@ -242,6 +251,7 @@ function matchesTarget(product: Product, target: string): boolean {
 
 function mainCategory(product: Product): string {
   if (product.productType === 'Monitor') return 'Monitorer';
+  if (product.productType === 'Röstinspelare / AI-note taker') return 'Ljud & Inspelning';
   if (product.productType === 'Laddare' || product.productType === 'Powerbank') return 'Laddning';
   if (product.productType === 'Kabel') return 'Kablar';
   if (product.productType === 'Hubb / Adapter') return 'Hubbar & Adaptrar';
@@ -259,6 +269,10 @@ function subCategory(product: Product, main: string): string {
   const specs = product.specificationTags;
   const text = product.searchText;
   if (main === 'Monitorer') return 'Skärmar';
+  if (main === 'Ljud & Inspelning') {
+    if (/phone call|samtal|call recording/.test(text)) return 'Samtalsinspelare';
+    return 'AI-röstinspelare';
+  }
   if (main === 'Laddning') {
     if (product.productType === 'Powerbank') return 'Powerbanks';
     if (specs.includes('qi2') || specs.includes('qi')) return 'Trådlös laddning';

@@ -47,6 +47,8 @@ const specMatchers: Array<{ test: (t: string) => string | null }> = [
   { test: (t) => (/apple watch/.test(t) ? 'apple watch' : null) },
   { test: (t) => (/iphone/.test(t) ? 'iphone' : null) },
   { test: (t) => (/ipad/.test(t) ? 'ipad' : null) },
+  { test: (t) => (/\b64\s?g(b)?\b|\b64gb\b/.test(t) ? '64gb' : null) },
+  { test: (t) => (/ble ?5\.?2|bluetooth ?5\.?2/.test(t) ? 'bluetooth 5.2' : null) },
 ];
 
 const featureMatchers: Array<{ test: (t: string) => string | null }> = [
@@ -62,6 +64,10 @@ const featureMatchers: Array<{ test: (t: string) => string | null }> = [
   { test: (t) => (/laptop|macbook/.test(t) ? 'laptop-användning' : null) },
   { test: (t) => (/ergonom/.test(t) ? 'ergonomisk' : null) },
   { test: (t) => (/uppladdningsbar|rechargeable/.test(t) ? 'uppladdningsbar' : null) },
+  { test: (t) => (/transcrib|transkrib/.test(t) ? 'transkribering' : null) },
+  { test: (t) => (/summary|summaries|sammanfatt/.test(t) ? 'ai-sammanfattning' : null) },
+  { test: (t) => (/phone call|call recording|samtal/.test(t) ? 'samtalsinspelning' : null) },
+  { test: (t) => (/in-person recording|meeting|mote|möte|lecture|interview/.test(t) ? 'mötesinspelning' : null) },
 ];
 
 function normalize(text: string): string {
@@ -105,6 +111,7 @@ function detectType(text: string): ProductType {
   if (/mouse|mus/.test(text)) return 'Mus';
   if (/keypad|numerisk/.test(text)) return 'Keypad';
   if (/keyboard|tangentbord/.test(text)) return 'Tangentbord';
+  if (/voice recorder|rostinspelare|röstinspelare|ai note taker|note taker|transcrib|transkrib|recording mode|speaker labels/.test(text)) return 'Röstinspelare / AI-note taker';
   if (/powerbank/.test(text)) return 'Powerbank';
   if (/charger|laddare|charging/.test(text)) return 'Laddare';
   if (/dock|dockningsstation/.test(text)) return 'Dockningsstation';
@@ -139,15 +146,21 @@ function collectSpecificationTags(text: string, productType: ProductType, settin
   if (layout) tags.add(layout);
 
   if (productType === 'Monitor') tags.add('monitor');
+  if (productType === 'Röstinspelare / AI-note taker') {
+    ['usb-c', 'gan', 'hdmi', 'displayport', 'vga', 'ethernet', 'sd-kortläsare', 'magsafe'].forEach((tag) => tags.delete(tag));
+  }
 
   return Array.from(tags).slice(0, settings.maxSpecTags);
 }
 
-function collectFeatureTags(text: string, settings: Settings): string[] {
+function collectFeatureTags(text: string, productType: ProductType, settings: Settings): string[] {
   const tags = new Set<string>();
   for (const matcher of featureMatchers) {
     const hit = matcher.test(text);
     if (hit) tags.add(hit);
+  }
+  if (productType === 'Röstinspelare / AI-note taker') {
+    ['magnetisk', 'aluminium', 'skrivbordssetup', 'skärmanslutning', 'laptop-användning'].forEach((tag) => tags.delete(tag));
   }
   return Array.from(tags).slice(0, settings.maxFeatureTags);
 }
@@ -189,6 +202,7 @@ function matchesTarget(product: Product, target: string): boolean {
 
 function mainCategory(product: Product): string {
   if (product.productType === 'Monitor') return 'Monitorer';
+  if (product.productType === 'Röstinspelare / AI-note taker') return 'Ljud & Inspelning';
   if (product.productType === 'Laddare' || product.productType === 'Powerbank') return 'Laddning';
   if (product.productType === 'Kabel') return 'Kablar';
   if (product.productType === 'Hubb / Adapter') return 'Hubbar & Adaptrar';
@@ -206,6 +220,10 @@ function subCategory(product: Product, main: string): string {
   const specs = product.specificationTags;
   const text = product.searchText;
   if (main === 'Monitorer') return 'Skärmar';
+  if (main === 'Ljud & Inspelning') {
+    if (/phone call|samtal|call recording/.test(text)) return 'Samtalsinspelare';
+    return 'AI-röstinspelare';
+  }
   if (main === 'Laddning') {
     if (product.productType === 'Powerbank') return 'Powerbanks';
     if (specs.includes('qi2') || specs.includes('qi')) return 'Trådlös laddning';
@@ -262,7 +280,7 @@ export function parseImportedProducts(sources: ImportedRawSource[], settings: Se
     const series = detectSeries(searchText);
     const color = detectColor(searchText);
     const specificationTags = collectSpecificationTags(searchText, productType, settings);
-    const featureTags = collectFeatureTags(searchText, settings);
+    const featureTags = collectFeatureTags(searchText, productType, settings);
     const filterTags = [...specificationTags];
 
     const product: Product = {
@@ -328,7 +346,7 @@ Viktiga regler:
 
 Returnera JSON i detta schema:
 {
-  "productType": "Monitor | Mus | Tangentbord | Keypad | Powerbank | Laddare | Dockningsstation | Hubb / Adapter | Kabel | Stativ / Hållare | Fodral / Skydd | Lifestyle | Övrigt tillbehör",
+  "productType": "Monitor | Mus | Tangentbord | Keypad | Röstinspelare / AI-note taker | Powerbank | Laddare | Dockningsstation | Hubb / Adapter | Kabel | Stativ / Hållare | Fodral / Skydd | Lifestyle | Övrigt tillbehör",
   "mainCategory": "string",
   "subCategory": "string",
   "series": "string | null",

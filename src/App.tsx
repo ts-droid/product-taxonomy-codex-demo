@@ -87,6 +87,8 @@ export default function App() {
   const [search, setSearch] = useState('');
 
   const dirty = draftRawUrls !== applied.rawUrls || draftReferences !== applied.references || JSON.stringify(draftSettings) !== JSON.stringify(applied.settings);
+  const draftRawUrlCount = useMemo(() => draftRawUrls.split(/\n+/).map((v) => v.trim()).filter(Boolean).length, [draftRawUrls]);
+  const appliedRawUrlCount = useMemo(() => applied.rawUrls.split(/\n+/).map((v) => v.trim()).filter(Boolean).length, [applied.rawUrls]);
   const products = useMemo(
     () => (importedSources.length ? parseImportedProducts(importedSources, applied.settings) : parseProducts(applied.rawUrls, applied.settings)),
     [applied, importedSources]
@@ -231,6 +233,12 @@ export default function App() {
                   {importMessage || 'Klicka på "Läs in RAW-data" för att hämta titel, specs och innehåll från källsidorna via backend.'}
                   {importedAt ? ` Senaste import: ${new Date(importedAt).toLocaleString('sv-SE')}.` : ''}
                 </div>
+                {dirty && (
+                  <div className="warning-box">
+                    <strong>Utkastet visas inte ännu</strong>
+                    <div className="small">Du har {draftRawUrlCount} RAW-länkar i utkastet men vyn bygger fortfarande på {appliedRawUrlCount} applicerade länkar tills du klickar `Spara / bygg om` eller `Läs in RAW-data`.</div>
+                  </div>
+                )}
                 {!!importFailures.length && (
                   <div className="warning-box">
                     <strong>Misslyckade importer</strong>
