@@ -501,7 +501,7 @@ function formatBulletLines(lines: string[], fallback: string): string {
 
 function renderPromptTemplate(template: string, replacements: Record<string, string | number>): string {
   return Object.entries(replacements).reduce(
-    (result, [key, value]) => result.replaceAll(`{{${key}}}`, String(value)),
+    (result, [key, value]) => result.split(`{{${key}}}`).join(String(value)),
     template
   );
 }

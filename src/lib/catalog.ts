@@ -148,7 +148,8 @@ function extractSlug(url: string): string {
     const parsed = new URL(url);
     const parts = parsed.pathname.split('/').map((part) => decodeURIComponent(part)).filter(Boolean);
     const cleaned = parts.filter((part) => !/^raw$/i.test(part));
-    return cleaned.at(-1)?.trim() ?? '';
+    const last = cleaned.length ? cleaned[cleaned.length - 1] : '';
+    return last.trim();
   } catch {
     return url.match(/\/products\/([^/?#]+)\/raw/i)?.[1] ?? '';
   }
