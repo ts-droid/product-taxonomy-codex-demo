@@ -6,14 +6,17 @@ import {
   ExternalLink,
   Filter,
   FolderTree,
+  Gavel,
   LayoutDashboard,
   Link2,
+  ListChecks,
   RefreshCcw,
   Save,
   Search,
   Settings2,
   Sparkles,
   Store,
+  ShieldCheck,
   Tags,
 } from 'lucide-react';
 import { Badge } from './components/Badge';
@@ -32,6 +35,14 @@ import {
   type RawImportFailure,
   type ReferenceImportFailure,
 } from './lib/rawPipeline';
+import {
+  deriveCandidateSuggestions,
+  normalizeTaxonomyValue,
+  type AdminReviewItem,
+  type AdminStoredTag,
+  type CandidateSuggestion,
+  type TaxonomyAdminState,
+} from './lib/taxonomyAdmin';
 
 const ALL_IN_MAIN = '__ALL_IN_MAIN__';
 
@@ -80,6 +91,25 @@ function currentProducts(mainGroup: ReturnType<typeof buildTaxonomy>['mainGroups
   return mainGroup.subGroups.find((item) => item.name === selectedSub)?.products ?? [];
 }
 
+function defaultManualTagDraft() {
+  return {
+    tagKey: 'specification' as const,
+    canonicalId: '',
+    displayName: '',
+    groupName: '',
+    aliases: '',
+  };
+}
+
+function defaultReviewDecisionDraft(item?: AdminReviewItem | null) {
+  return {
+    canonicalId: item?.suggestedDisplayName ? normalizeTaxonomyValue(item.suggestedDisplayName).replace(/\s+/g, '_') : item?.candidateValue ? normalizeTaxonomyValue(item.candidateValue).replace(/\s+/g, '_') : '',
+    displayName: item?.suggestedDisplayName ?? item?.candidateValue ?? '',
+    groupName: item?.suggestedGroup ?? '',
+    aliases: item?.candidateValue ?? '',
+  };
+}
+
 export default function App() {
   const defaultPromptTemplates = useMemo(() => ({
     raw: DEFAULT_RAW_PROMPT_TEMPLATE,
@@ -103,6 +133,15 @@ export default function App() {
   const [importStatus, setImportStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [importedAt, setImportedAt] = useState<string | null>(null);
   const [importMessage, setImportMessage] = useState('');
+  const [adminState, setAdminState] = useState<TaxonomyAdminState | null>(null);
+  const [adminStatus, setAdminStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [adminMessage, setAdminMessage] = useState('');
+  const [adminActionStatus, setAdminActionStatus] = useState<'idle' | 'saving'>('idle');
+  const [selectedAdminTagKey, setSelectedAdminTagKey] = useState<'all' | 'specification' | 'compatibility' | 'feature'>('all');
+  const [registrySearch, setRegistrySearch] = useState('');
+  const [selectedReviewId, setSelectedReviewId] = useState<number | null>(null);
+  const [manualTagDraft, setManualTagDraft] = useState(defaultManualTagDraft);
+  const [reviewDecisionDraft, setReviewDecisionDraft] = useState(defaultReviewDecisionDraft());
   const [selectedPromptSourceId, setSelectedPromptSourceId] = useState<number | null>(null);
   const [selectedMain, setSelectedMain] = useState<string | null>(null);
   const [selectedSub, setSelectedSub] = useState<string>(ALL_IN_MAIN);
@@ -156,6 +195,147 @@ export default function App() {
     });
     return new Map(entries);
   }, [products, importedSources, importedReferences]);
+  const candidateSuggestions = useMemo<CandidateSuggestion[]>(
+    () => {
+      if (!adminState) return [];
+      const queued = new Set(adminState.reviewQueue.map((item) => `${item.tagKey}:${item.normalizedCandidate}`));
+      return deriveCandidateSuggestions(products, importedSources, adminState.storedTags)
+        .filter((candidate) => !queued.has(`${candidate.key}:${normalizeTaxonomyValue(candidate.candidateValue)}`));
+    },
+    [adminState, products, importedSources]
+  );
+  const filteredRegistryTags = useMemo(() => {
+    const q = registrySearch.trim().toLowerCase();
+    return (adminState?.storedTags ?? [])
+      .filter((tag) => selectedAdminTagKey === 'all' || tag.tagKey === selectedAdminTagKey)
+      .filter((tag) => {
+        if (!q) return true;
+        const haystack = [tag.displayName, tag.canonicalId, tag.groupName ?? '', ...tag.aliases].join(' ').toLowerCase();
+        return haystack.includes(q);
+      })
+      .sort((a, b) => a.tagKey.localeCompare(b.tagKey) || a.displayName.localeCompare(b.displayName, 'sv'));
+  }, [adminState, registrySearch, selectedAdminTagKey]);
+  const pendingReviewItems = useMemo(
+    () => (adminState?.reviewQueue ?? []).filter((item) => item.status === 'pending'),
+    [adminState]
+  );
+  const selectedReviewItem = useMemo(
+    () => adminState?.reviewQueue.find((item) => item.id === selectedReviewId) ?? pendingReviewItems[0] ?? null,
+    [adminState, pendingReviewItems, selectedReviewId]
+  );
+
+  const refreshAdminState = async (message?: string) => {
+    setAdminStatus('loading');
+    if (message) setAdminMessage(message);
+
+    try {
+      const response = await fetch('/api/taxonomy-admin/state');
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error ?? `Kunde inte läsa taxonomy-admin-state (${response.status})`);
+      }
+
+      const data = await response.json() as TaxonomyAdminState;
+      setAdminState(data);
+      setAdminStatus('success');
+      setAdminMessage(message ?? 'Canonical tags, alias och review-kö hämtades från taxonomy-admin.');
+      setSelectedReviewId((current) => current ?? data.reviewQueue.find((item) => item.status === 'pending')?.id ?? null);
+    } catch (error) {
+      setAdminStatus('error');
+      setAdminMessage(error instanceof Error ? error.message : 'Okänt fel i taxonomy-admin.');
+    }
+  };
+
+  const queueCandidate = async (candidate: CandidateSuggestion) => {
+    setAdminActionStatus('saving');
+    try {
+      const response = await fetch('/api/taxonomy-admin/review', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          sourceRef: candidate.sourceRef,
+          tagKey: candidate.key,
+          candidateValue: candidate.candidateValue,
+          suggestedDisplayName: candidate.suggestedDisplayName,
+          suggestedGroup: candidate.suggestedGroup,
+          reason: candidate.reason,
+          evidence: {
+            sourceTitle: candidate.sourceTitle,
+            evidence: candidate.evidence,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error ?? 'Kunde inte lägga kandidaten i review-kön.');
+      }
+
+      await refreshAdminState(`Kandidaten "${candidate.candidateValue}" skickades till review-kön.`);
+    } catch (error) {
+      setAdminStatus('error');
+      setAdminMessage(error instanceof Error ? error.message : 'Kunde inte skicka kandidaten till review-kön.');
+    } finally {
+      setAdminActionStatus('idle');
+    }
+  };
+
+  const saveCanonicalTag = async () => {
+    setAdminActionStatus('saving');
+    try {
+      const response = await fetch('/api/taxonomy-admin/tags', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(manualTagDraft),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error ?? 'Kunde inte spara canonical tag.');
+      }
+
+      setManualTagDraft(defaultManualTagDraft());
+      await refreshAdminState('Canonical tag sparades i taxonomy-registret.');
+    } catch (error) {
+      setAdminStatus('error');
+      setAdminMessage(error instanceof Error ? error.message : 'Kunde inte spara canonical tag.');
+    } finally {
+      setAdminActionStatus('idle');
+    }
+  };
+
+  const decideReviewItem = async (decision: 'approved' | 'rejected') => {
+    if (!selectedReviewItem) return;
+
+    setAdminActionStatus('saving');
+    try {
+      const response = await fetch(`/api/taxonomy-admin/review/${selectedReviewItem.id}/decision`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          decision,
+          tagKey: selectedReviewItem.tagKey,
+          canonicalId: reviewDecisionDraft.canonicalId,
+          displayName: reviewDecisionDraft.displayName,
+          groupName: reviewDecisionDraft.groupName,
+          aliases: reviewDecisionDraft.aliases,
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error ?? 'Kunde inte uppdatera review-item.');
+      }
+
+      setReviewDecisionDraft(defaultReviewDecisionDraft());
+      await refreshAdminState(decision === 'approved' ? 'Review-item godkänd och sparad som canonical tag.' : 'Review-item markerades som avslagen.');
+    } catch (error) {
+      setAdminStatus('error');
+      setAdminMessage(error instanceof Error ? error.message : 'Kunde inte uppdatera review-item.');
+    } finally {
+      setAdminActionStatus('idle');
+    }
+  };
 
   useEffect(() => {
     if (!taxonomy.mainGroups.length) return;
@@ -167,6 +347,19 @@ export default function App() {
       setSelectedSpecFilters([]);
     }
   }, [taxonomy, selectedMain]);
+
+  useEffect(() => {
+    refreshAdminState();
+  }, []);
+
+  useEffect(() => {
+    if (selectedReviewItem) {
+      setReviewDecisionDraft(defaultReviewDecisionDraft(selectedReviewItem));
+      if (selectedReviewId !== selectedReviewItem.id) {
+        setSelectedReviewId(selectedReviewItem.id);
+      }
+    }
+  }, [selectedReviewItem]);
 
   const mainGroup = taxonomy.mainGroups.find((item) => item.name === selectedMain) ?? taxonomy.mainGroups[0];
   const baseProducts = currentProducts(mainGroup, selectedSub);
@@ -378,6 +571,66 @@ export default function App() {
               </div>
             </Section>
 
+            <Section title="Taxonomy-governance" subtitle="Här styr du canonical tags, alias och review-kö för specifikationer, passar till/med och funktioner." icon={ShieldCheck} right={adminState ? <Badge tone="accent">{adminState.summary.totalTags} canonical</Badge> : <Badge tone="warning">Laddar</Badge>}>
+              <div className="button-row">
+                <button className="secondary-button" onClick={() => refreshAdminState('Taxonomy-admin uppdateras...')} disabled={adminStatus === 'loading' || adminActionStatus === 'saving'}>
+                  <RefreshCcw size={16} /> {adminStatus === 'loading' ? 'Laddar adminstate...' : 'Uppdatera adminstate'}
+                </button>
+              </div>
+              <div className="status-stack">
+                <div className="status-item">
+                  <span className="subheading">Adminstatus</span>
+                  {adminStatus === 'loading' ? <Badge tone="warning">Läser DB</Badge> : adminStatus === 'success' ? <Badge tone="success">Canonical registry aktiv</Badge> : adminStatus === 'error' ? <Badge tone="warning">Adminfel</Badge> : <Badge>Idle</Badge>}
+                </div>
+                <div className="muted">{adminMessage || 'Canonical registry och review-kö laddas från taxonomy-admin när vyn öppnas.'}</div>
+              </div>
+              {adminState && (
+                <div className="admin-summary-grid">
+                  <div className="range-box">
+                    <div className="range-head"><span>Specifikationer</span><strong>{adminState.summary.byKey.specification}</strong></div>
+                    <div className="muted small">Kända canonical specs och alias</div>
+                  </div>
+                  <div className="range-box">
+                    <div className="range-head"><span>Passar till/med</span><strong>{adminState.summary.byKey.compatibility}</strong></div>
+                    <div className="muted small">Canonical kompatibilitetsmål</div>
+                  </div>
+                  <div className="range-box">
+                    <div className="range-head"><span>Funktioner</span><strong>{adminState.summary.byKey.feature}</strong></div>
+                    <div className="muted small">Canonical funktionsvokabulär</div>
+                  </div>
+                  <div className="range-box">
+                    <div className="range-head"><span>Alias</span><strong>{adminState.summary.totalAliases}</strong></div>
+                    <div className="muted small">Fuzzy/synonymmatchningar</div>
+                  </div>
+                  <div className="range-box">
+                    <div className="range-head"><span>Review-kö</span><strong>{adminState.summary.pendingReview}</strong></div>
+                    <div className="muted small">Väntar på beslut</div>
+                  </div>
+                </div>
+              )}
+              <div className="split-grid">
+                <div className="field-stack">
+                  <label>Ny canonical tag</label>
+                  <select className="select-field" value={manualTagDraft.tagKey} onChange={(e) => setManualTagDraft((current) => ({ ...current, tagKey: e.target.value as 'specification' | 'compatibility' | 'feature' }))}>
+                    <option value="specification">Specification</option>
+                    <option value="compatibility">Compatibility</option>
+                    <option value="feature">Feature</option>
+                  </select>
+                  <input className="text-field" value={manualTagDraft.displayName} onChange={(e) => setManualTagDraft((current) => ({ ...current, displayName: e.target.value }))} placeholder="Display name" />
+                  <input className="text-field" value={manualTagDraft.canonicalId} onChange={(e) => setManualTagDraft((current) => ({ ...current, canonicalId: e.target.value }))} placeholder="canonical_id" />
+                  <input className="text-field" value={manualTagDraft.groupName} onChange={(e) => setManualTagDraft((current) => ({ ...current, groupName: e.target.value }))} placeholder="Group" />
+                  <textarea className="compact-area" value={manualTagDraft.aliases} onChange={(e) => setManualTagDraft((current) => ({ ...current, aliases: e.target.value }))} placeholder="Alias eller synonymer, separera med radbrytning eller komma" />
+                  <button className="primary-button" onClick={saveCanonicalTag} disabled={adminActionStatus === 'saving'}>
+                    <Save size={16} /> {adminActionStatus === 'saving' ? 'Sparar...' : 'Spara canonical tag'}
+                  </button>
+                </div>
+                <div className="info-box">
+                  <strong>Governance-regler</strong>
+                  <p>Adminvyn följer nu samma modell för alla tre spår: `specification`, `compatibility` och `feature`. Nya värden ska helst först matcha mot kända canonical tags eller alias. Om ingen träff finns skickas kandidaten till review-kön där du kan godkänna, avslå eller göra om den till en ny canonical tag.</p>
+                </div>
+              </div>
+            </Section>
+
             <Section title="Kategoriöversikt" subtitle="Endast ett fallback-spår används nu: Fler tillbehör / Blandat. Det minskar dubbel 'övrigt'-känsla." icon={FolderTree}>
               <div className="list-stack">
                 {taxonomy.mainGroups.map((group) => (
@@ -476,6 +729,117 @@ export default function App() {
                 </>
               ) : (
                 <div className="empty">Promptmallarna kan redigeras redan nu. Kör sedan RAW-import för att rendera dem med verkligt produktinnehåll och matchade externa referenser i stället för bara sluggen.</div>
+              )}
+            </Section>
+
+            <Section title="Kandidatförslag" subtitle="Visar taggar från aktuell import som ännu inte matchar kända canonical tags eller alias." icon={ListChecks} right={<Badge tone={candidateSuggestions.length ? 'warning' : 'success'}>{candidateSuggestions.length} öppna</Badge>}>
+              {candidateSuggestions.length ? (
+                <div className="list-stack compact">
+                  {candidateSuggestions.map((candidate) => (
+                    <div className="row-item" key={`${candidate.key}-${candidate.sourceRef}-${candidate.candidateValue}`}>
+                      <div className="group-row">
+                        <div>
+                          <strong>{candidate.candidateValue}</strong>
+                          <div className="muted small">{candidate.key} · föreslagen grupp: {candidate.suggestedGroup}</div>
+                          <div className="muted small">{candidate.sourceTitle}</div>
+                        </div>
+                        <button className="secondary-button" onClick={() => queueCandidate(candidate)} disabled={adminActionStatus === 'saving'}>
+                          <Gavel size={16} /> Till review
+                        </button>
+                      </div>
+                      <div className="info-box compact-box">
+                        <strong>Evidens</strong>
+                        <p>{candidate.evidence}</p>
+                        <div className="muted small">{candidate.reason}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty">Aktuell import matchar kända canonical tags eller alias. Inga nya kandidater hittades just nu.</div>
+              )}
+            </Section>
+
+            <Section title="Review-kö" subtitle="Här beslutar du om nya specs, passar till/med-värden och funktioner ska bli canonical tags eller avslås." icon={Gavel} right={<Badge tone={pendingReviewItems.length ? 'warning' : 'success'}>{pendingReviewItems.length} väntar</Badge>}>
+              <div className="split-grid">
+                <div className="list-stack compact">
+                  {(adminState?.reviewQueue ?? []).length ? (
+                    (adminState?.reviewQueue ?? []).map((item) => (
+                      <button key={item.id} className={selectedReviewItem?.id === item.id ? 'review-item active' : 'review-item'} onClick={() => setSelectedReviewId(item.id)}>
+                        <div className="group-row">
+                          <div>
+                            <strong>{item.candidateValue}</strong>
+                            <div className="muted small">{item.tagKey} · {item.suggestedGroup ?? 'utan grupp'}</div>
+                          </div>
+                          <Badge tone={item.status === 'approved' ? 'success' : item.status === 'rejected' ? 'default' : 'warning'}>{item.status}</Badge>
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="empty">Review-kön är tom.</div>
+                  )}
+                </div>
+                <div>
+                  {selectedReviewItem ? (
+                    <div className="field-stack">
+                      <label>Valt review-item</label>
+                      <div className="info-box compact-box">
+                        <strong>{selectedReviewItem.candidateValue}</strong>
+                        <div className="muted small">{selectedReviewItem.tagKey} · {selectedReviewItem.reason}</div>
+                        <p className="small">{typeof selectedReviewItem.evidence?.evidence === 'string' ? selectedReviewItem.evidence.evidence : 'Ingen evidensrad sparad.'}</p>
+                      </div>
+                      <input className="text-field" value={reviewDecisionDraft.displayName} onChange={(e) => setReviewDecisionDraft((current) => ({ ...current, displayName: e.target.value }))} placeholder="Display name" />
+                      <input className="text-field" value={reviewDecisionDraft.canonicalId} onChange={(e) => setReviewDecisionDraft((current) => ({ ...current, canonicalId: e.target.value }))} placeholder="canonical_id" />
+                      <input className="text-field" value={reviewDecisionDraft.groupName} onChange={(e) => setReviewDecisionDraft((current) => ({ ...current, groupName: e.target.value }))} placeholder="Group" />
+                      <textarea className="compact-area" value={reviewDecisionDraft.aliases} onChange={(e) => setReviewDecisionDraft((current) => ({ ...current, aliases: e.target.value }))} placeholder="Alias som ska följa med vid godkännande" />
+                      <div className="button-row">
+                        <button className="primary-button" onClick={() => decideReviewItem('approved')} disabled={adminActionStatus === 'saving'}>
+                          <ShieldCheck size={16} /> Godkänn som canonical
+                        </button>
+                        <button className="secondary-button" onClick={() => decideReviewItem('rejected')} disabled={adminActionStatus === 'saving'}>
+                          <Gavel size={16} /> Avslå förslag
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="empty">Välj ett review-item för att godkänna eller avslå det.</div>
+                  )}
+                </div>
+              </div>
+            </Section>
+
+            <Section title="Canonical registry" subtitle="Sök bland kända specifikationer, kompatibilitetsmål och funktioner inklusive alias." icon={Tags} right={adminState ? <Badge tone="accent">{filteredRegistryTags.length} synliga</Badge> : <Badge tone="warning">Laddar</Badge>}>
+              <div className="toolbar compact-toolbar">
+                <div className="pill-row">
+                  <Pill active={selectedAdminTagKey === 'all'} onClick={() => setSelectedAdminTagKey('all')}>Alla</Pill>
+                  <Pill active={selectedAdminTagKey === 'specification'} onClick={() => setSelectedAdminTagKey('specification')}>Specification</Pill>
+                  <Pill active={selectedAdminTagKey === 'compatibility'} onClick={() => setSelectedAdminTagKey('compatibility')}>Compatibility</Pill>
+                  <Pill active={selectedAdminTagKey === 'feature'} onClick={() => setSelectedAdminTagKey('feature')}>Feature</Pill>
+                </div>
+                <div className="search-box compact-search">
+                  <Search size={16} />
+                  <input value={registrySearch} onChange={(e) => setRegistrySearch(e.target.value)} placeholder="Sök label, id eller alias" />
+                </div>
+              </div>
+              {filteredRegistryTags.length ? (
+                <div className="list-stack compact">
+                  {filteredRegistryTags.map((tag) => (
+                    <div className="row-item" key={`${tag.tagKey}-${tag.canonicalId}`}>
+                      <div className="group-row">
+                        <div>
+                          <strong>{tag.displayName}</strong>
+                          <div className="muted small">{tag.tagKey} · {tag.canonicalId} · {tag.groupName ?? 'utan grupp'}</div>
+                        </div>
+                        <Badge tone={tag.status === 'approved' ? 'success' : 'warning'}>{tag.status}</Badge>
+                      </div>
+                      <div className="pill-row">
+                        {tag.aliases.length ? tag.aliases.map((alias) => <span className="mini-tag soft" key={`${tag.canonicalId}-${alias}`}>{alias}</span>) : <span className="muted small">Inga alias sparade</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty">Ingen canonical tag matchade ditt filter just nu.</div>
               )}
             </Section>
 

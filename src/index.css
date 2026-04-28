@@ -9,6 +9,9 @@ body { margin: 0; background: #f4f4f5; color: #18181b; }
 button, input, textarea { font: inherit; }
 button { cursor: pointer; }
 a { color: inherit; text-decoration: none; }
+input, select {
+  font: inherit;
+}
 
 .app-shell { max-width: 1400px; margin: 0 auto; padding: 24px; }
 .card {
@@ -49,6 +52,17 @@ label { display: block; font-weight: 600; margin-bottom: 8px; }
 textarea {
   width: 100%; min-height: 280px; resize: vertical; border: 1px solid #e4e4e7; border-radius: 18px; background: #fafafa; padding: 16px;
 }
+.text-field {
+  width: 100%;
+  border: 1px solid #e4e4e7;
+  border-radius: 16px;
+  background: #fafafa;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.compact-area {
+  min-height: 120px;
+}
 .field-stack + .field-stack { margin-top: 16px; }
 .select-field {
   width: 100%;
@@ -56,6 +70,7 @@ textarea {
   border-radius: 16px;
   background: #fafafa;
   padding: 12px 14px;
+  margin-bottom: 12px;
 }
 .status-stack { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
 .status-item { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
@@ -68,6 +83,7 @@ textarea {
   white-space: pre;
 }
 .ranges-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.admin-summary-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
 .range-box { background: #fafafa; border: 1px solid #e4e4e7; border-radius: 18px; padding: 14px; }
 .range-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .range-box input { width: 100%; }
@@ -99,8 +115,10 @@ textarea {
 .nav-main.active { background: #18181b; color: white; }
 .nav-sub.active { background: #f4f4f5; color: #18181b; }
 .toolbar { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+.compact-toolbar { align-items: center; }
 .view-title { font-size: 28px; font-weight: 700; line-height: 1.1; }
 .search-box { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border: 1px solid #e4e4e7; background: #fafafa; border-radius: 18px; min-width: 320px; }
+.compact-search { min-width: 280px; margin-bottom: 0; }
 .search-box input { border: 0; outline: none; background: transparent; width: 100%; }
 .pill { border: 1px solid #e4e4e7; background: white; padding: 8px 12px; border-radius: 999px; color: #3f3f46; }
 .pill-active { background: #18181b; color: white; border-color: #18181b; }
@@ -110,12 +128,25 @@ textarea {
 .grid.products-grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .icon-link { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 12px; background: #f4f4f5; }
 .empty { padding: 12px; border-radius: 16px; background: #fafafa; border: 1px dashed #d4d4d8; color: #71717a; }
+.compact-box { margin-top: 0; }
+.review-item {
+  width: 100%;
+  border: 1px solid #e4e4e7;
+  border-radius: 18px;
+  background: white;
+  padding: 14px;
+  text-align: left;
+}
+.review-item.active {
+  border-color: #18181b;
+  box-shadow: inset 0 0 0 1px #18181b;
+}
 
 @media (max-width: 1200px) {
-  .stats-grid, .two-col, .two-col.sidebar-layout, .split-grid, .ranges-grid, .tag-columns, .grid.products-grid.three, .grid.products-grid.four { grid-template-columns: 1fr 1fr; }
+  .stats-grid, .two-col, .two-col.sidebar-layout, .split-grid, .ranges-grid, .tag-columns, .grid.products-grid.three, .grid.products-grid.four, .admin-summary-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 900px) {
   .hero, .toolbar { flex-direction: column; }
-  .stats-grid, .two-col, .two-col.sidebar-layout, .split-grid, .ranges-grid, .tag-columns, .grid.products-grid.two, .grid.products-grid.three, .grid.products-grid.four { grid-template-columns: 1fr; }
+  .stats-grid, .two-col, .two-col.sidebar-layout, .split-grid, .ranges-grid, .tag-columns, .grid.products-grid.two, .grid.products-grid.three, .grid.products-grid.four, .admin-summary-grid { grid-template-columns: 1fr; }
   .search-box { min-width: 0; width: 100%; }
 }

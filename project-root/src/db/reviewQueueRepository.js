@@ -93,3 +93,34 @@ export function listReviewQueue(db, status = 'pending') {
     ORDER BY created_at DESC
   `).all(status);
 }
+
+export function getReviewItemById(db, id) {
+  return db.prepare(`
+    SELECT
+      id,
+      source_ref,
+      tag_key,
+      candidate_value,
+      normalized_candidate,
+      suggested_display_name,
+      suggested_group,
+      matched_tag_id,
+      matched_alias_id,
+      reason,
+      evidence_json,
+      status,
+      created_at
+    FROM review_queue
+    WHERE id = ?
+  `).get(id);
+}
+
+export function updateReviewItemStatus(db, id, status) {
+  db.prepare(`
+    UPDATE review_queue
+    SET status = ?
+    WHERE id = ?
+  `).run(status, id);
+
+  return getReviewItemById(db, id);
+}

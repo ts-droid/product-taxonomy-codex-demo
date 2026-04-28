@@ -1,10 +1,17 @@
 import express from 'express';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const distDir = path.join(__dirname, 'dist');
+const taxonomyPaths = {
+  specification: path.join(__dirname, 'project-root/src/taxonomy/specifications.json'),
+  compatibility: path.join(__dirname, 'project-root/src/taxonomy/compatibility_targets.json'),
+  feature: path.join(__dirname, 'project-root/src/taxonomy/feature_registry.json'),
+};
+const adminTagKeys = new Set(['specification', 'compatibility', 'feature']);
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -260,6 +267,149 @@ function isBlockedHostname(hostname) {
   return false;
 }
 
+function readJsonFile(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+function trimString(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function parseTagKey(value) {
+  const key = trimString(value);
+  return adminTagKeys.has(key) ? key : null;
+}
+
+function slugifyCanonicalId(value) {
+  return decodeHtmlEntities(String(value ?? ''))
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/_+/g, '_');
+}
+
+function parseAliases(value) {
+  if (Array.isArray(value)) return value.map((item) => trimString(item)).filter(Boolean);
+  if (typeof value === 'string') {
+    return value
+      .split(/\n|,/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function parseEvidence(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value;
+}
+
+async function loadTaxonomyDbModules() {
+  const [database, tagRepository, reviewQueueRepository] = await Promise.all([
+    import(new URL('./project-root/src/db/database.js', import.meta.url).href),
+    import(new URL('./project-root/src/db/tagRepository.js', import.meta.url).href),
+    import(new URL('./project-root/src/db/reviewQueueRepository.js', import.meta.url).href),
+  ]);
+
+  return { database, tagRepository, reviewQueueRepository };
+}
+
+async function ensureTaxonomySeeded(db, tagRepository) {
+  if (tagRepository.getAllTags(db).length) return;
+
+  const specificationRegistry = readJsonFile(taxonomyPaths.specification);
+  const compatibilityRegistry = readJsonFile(taxonomyPaths.compatibility);
+  const featureRegistry = readJsonFile(taxonomyPaths.feature);
+
+  for (const specification of specificationRegistry.specifications ?? []) {
+    const stored = tagRepository.upsertCanonicalTag(db, {
+      tagKey: 'specification',
+      canonicalId: specification.id,
+      displayName: specification.label,
+      groupName: specification.group ?? null,
+      status: 'approved',
+      source: 'taxonomy_seed',
+    });
+    for (const alias of specification.aliases ?? []) {
+      tagRepository.upsertTagAlias(db, { tagId: stored.id, aliasValue: alias });
+    }
+  }
+
+  for (const target of compatibilityRegistry.compatibility_targets ?? []) {
+    const stored = tagRepository.upsertCanonicalTag(db, {
+      tagKey: 'compatibility',
+      canonicalId: target.id,
+      displayName: target.label,
+      groupName: target.group ?? null,
+      status: 'approved',
+      source: 'taxonomy_seed',
+    });
+    for (const alias of target.aliases ?? []) {
+      tagRepository.upsertTagAlias(db, { tagId: stored.id, aliasValue: alias });
+    }
+  }
+
+  for (const feature of featureRegistry.features ?? []) {
+    const stored = tagRepository.upsertCanonicalTag(db, {
+      tagKey: 'feature',
+      canonicalId: feature.id,
+      displayName: feature.label,
+      groupName: feature.group ?? null,
+      status: 'approved',
+      source: 'taxonomy_seed',
+    });
+    for (const alias of feature.aliases ?? []) {
+      tagRepository.upsertTagAlias(db, { tagId: stored.id, aliasValue: alias });
+    }
+  }
+}
+
+async function withTaxonomyDb(run) {
+  const { database, tagRepository, reviewQueueRepository } = await loadTaxonomyDbModules();
+  const db = database.initializeDatabase();
+  try {
+    await ensureTaxonomySeeded(db, tagRepository);
+    return await run({ db, tagRepository, reviewQueueRepository });
+  } finally {
+    db.close();
+  }
+}
+
+function serializeStoredTag(tag, aliases = []) {
+  return {
+    id: tag.id,
+    tagKey: tag.tag_key,
+    canonicalId: tag.canonical_id,
+    displayName: tag.display_name,
+    normalizedValue: tag.normalized_value,
+    groupName: tag.group_name,
+    status: tag.status,
+    source: tag.source,
+    aliases: aliases.map((alias) => alias.alias_value),
+    createdAt: tag.created_at,
+  };
+}
+
+function serializeReviewItem(item) {
+  return {
+    id: item.id,
+    sourceRef: item.source_ref,
+    tagKey: item.tag_key,
+    candidateValue: item.candidate_value,
+    normalizedCandidate: item.normalized_candidate,
+    suggestedDisplayName: item.suggested_display_name,
+    suggestedGroup: item.suggested_group,
+    matchedTagId: item.matched_tag_id,
+    matchedAliasId: item.matched_alias_id,
+    reason: item.reason,
+    evidence: item.evidence_json ? JSON.parse(item.evidence_json) : null,
+    status: item.status,
+    createdAt: item.created_at,
+  };
+}
+
 async function fetchRawSource(url, index) {
   let parsed;
   try {
@@ -389,6 +539,186 @@ async function fetchReferenceSource(url, index) {
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, now: new Date().toISOString() });
+});
+
+app.get('/api/taxonomy-admin/state', async (_req, res) => {
+  try {
+    const payload = await withTaxonomyDb(async ({ db, tagRepository, reviewQueueRepository }) => {
+      const storedTags = tagRepository.getAllTags(db).map((tag) => {
+        const aliases = tagRepository.getAliasesForTag(db, tag.id);
+        return serializeStoredTag(tag, aliases);
+      });
+      const reviewQueue = reviewQueueRepository.listReviewQueue(db, 'all').map(serializeReviewItem);
+      const totalAliases = storedTags.reduce((sum, tag) => sum + tag.aliases.length, 0);
+
+      return {
+        summary: {
+          totalTags: storedTags.length,
+          totalAliases,
+          pendingReview: reviewQueue.filter((item) => item.status === 'pending').length,
+          byKey: {
+            specification: storedTags.filter((tag) => tag.tagKey === 'specification').length,
+            compatibility: storedTags.filter((tag) => tag.tagKey === 'compatibility').length,
+            feature: storedTags.filter((tag) => tag.tagKey === 'feature').length,
+          },
+        },
+        sourceTaxonomy: {
+          specifications: readJsonFile(taxonomyPaths.specification).specifications ?? [],
+          compatibility_targets: readJsonFile(taxonomyPaths.compatibility).compatibility_targets ?? [],
+          features: readJsonFile(taxonomyPaths.feature).features ?? [],
+        },
+        storedTags,
+        reviewQueue,
+      };
+    });
+
+    res.json(payload);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Kunde inte läsa taxonomy-admin-state.' });
+  }
+});
+
+app.post('/api/taxonomy-admin/review', async (req, res) => {
+  const tagKey = parseTagKey(req.body?.tagKey);
+  const candidateValue = trimString(req.body?.candidateValue);
+  const reason = trimString(req.body?.reason);
+
+  if (!tagKey) {
+    return res.status(400).json({ error: 'Ogiltig tagKey. Använd specification, compatibility eller feature.' });
+  }
+
+  if (!candidateValue) {
+    return res.status(400).json({ error: 'candidateValue krävs.' });
+  }
+
+  if (!reason) {
+    return res.status(400).json({ error: 'reason krävs.' });
+  }
+
+  try {
+    const payload = await withTaxonomyDb(async ({ db, tagRepository, reviewQueueRepository }) => {
+      const matchedTag = tagRepository.findTagByAlias(db, tagKey, candidateValue);
+      const item = reviewQueueRepository.enqueueReviewItem(db, {
+        sourceRef: trimString(req.body?.sourceRef) || undefined,
+        tagKey,
+        candidateValue,
+        suggestedDisplayName: trimString(req.body?.suggestedDisplayName) || undefined,
+        suggestedGroup: trimString(req.body?.suggestedGroup) || undefined,
+        matchedTagId: matchedTag?.id ?? null,
+        reason,
+        evidence: parseEvidence(req.body?.evidence),
+      });
+
+      return serializeReviewItem(item);
+    });
+
+    res.status(201).json(payload);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Kunde inte lägga kandidat i review-kön.' });
+  }
+});
+
+app.post('/api/taxonomy-admin/tags', async (req, res) => {
+  const tagKey = parseTagKey(req.body?.tagKey);
+  const displayName = trimString(req.body?.displayName);
+  const canonicalId = trimString(req.body?.canonicalId) || slugifyCanonicalId(displayName);
+  const groupName = trimString(req.body?.groupName) || null;
+  const aliases = Array.from(new Set(parseAliases(req.body?.aliases)));
+
+  if (!tagKey) {
+    return res.status(400).json({ error: 'Ogiltig tagKey. Använd specification, compatibility eller feature.' });
+  }
+
+  if (!displayName || !canonicalId) {
+    return res.status(400).json({ error: 'displayName och canonicalId krävs.' });
+  }
+
+  try {
+    const payload = await withTaxonomyDb(async ({ db, tagRepository }) => {
+      const storedTag = tagRepository.upsertCanonicalTag(db, {
+        tagKey,
+        canonicalId,
+        displayName,
+        groupName,
+        status: 'approved',
+        source: 'admin_manual',
+      });
+
+      for (const alias of aliases) {
+        tagRepository.upsertTagAlias(db, { tagId: storedTag.id, aliasValue: alias });
+      }
+
+      const hydrated = serializeStoredTag(storedTag, tagRepository.getAliasesForTag(db, storedTag.id));
+      return hydrated;
+    });
+
+    res.status(201).json(payload);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Kunde inte spara canonical tag.' });
+  }
+});
+
+app.post('/api/taxonomy-admin/review/:id/decision', async (req, res) => {
+  const reviewId = Number(req.params.id);
+  const decision = trimString(req.body?.decision);
+
+  if (!Number.isFinite(reviewId)) {
+    return res.status(400).json({ error: 'Ogiltigt review-id.' });
+  }
+
+  if (!['approved', 'rejected'].includes(decision)) {
+    return res.status(400).json({ error: 'decision måste vara approved eller rejected.' });
+  }
+
+  try {
+    const payload = await withTaxonomyDb(async ({ db, tagRepository, reviewQueueRepository }) => {
+      const current = reviewQueueRepository.getReviewItemById(db, reviewId);
+      if (!current) return null;
+
+      let approvedTag = null;
+
+      if (decision === 'approved') {
+        const tagKey = parseTagKey(req.body?.tagKey) ?? parseTagKey(current.tag_key);
+        const displayName = trimString(req.body?.displayName) || current.suggested_display_name || current.candidate_value;
+        const canonicalId = trimString(req.body?.canonicalId) || slugifyCanonicalId(displayName);
+        const groupName = trimString(req.body?.groupName) || current.suggested_group || null;
+        const aliases = Array.from(new Set([current.candidate_value, ...parseAliases(req.body?.aliases)]));
+
+        if (!tagKey || !displayName || !canonicalId) {
+          throw new Error('Saknar data för att godkänna review-item.');
+        }
+
+        const storedTag = tagRepository.upsertCanonicalTag(db, {
+          tagKey,
+          canonicalId,
+          displayName,
+          groupName,
+          status: 'approved',
+          source: 'admin_approved',
+        });
+
+        for (const alias of aliases) {
+          tagRepository.upsertTagAlias(db, { tagId: storedTag.id, aliasValue: alias });
+        }
+
+        approvedTag = serializeStoredTag(storedTag, tagRepository.getAliasesForTag(db, storedTag.id));
+      }
+
+      const updatedReview = reviewQueueRepository.updateReviewItemStatus(db, reviewId, decision);
+      return {
+        reviewItem: updatedReview ? serializeReviewItem(updatedReview) : null,
+        approvedTag,
+      };
+    });
+
+    if (!payload) {
+      return res.status(404).json({ error: 'Review-item hittades inte.' });
+    }
+
+    res.json(payload);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Kunde inte uppdatera review-item.' });
+  }
 });
 
 app.post('/api/import-raw', async (req, res) => {

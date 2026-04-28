@@ -123,3 +123,38 @@ export function listReviewQueue(db: BetterSqliteDatabase, status: ReviewQueueIte
     ORDER BY created_at DESC
   `).all(status) as ReviewQueueItem[];
 }
+
+export function getReviewItemById(db: BetterSqliteDatabase, id: number) {
+  return db.prepare(`
+    SELECT
+      id,
+      source_ref,
+      tag_key,
+      candidate_value,
+      normalized_candidate,
+      suggested_display_name,
+      suggested_group,
+      matched_tag_id,
+      matched_alias_id,
+      reason,
+      evidence_json,
+      status,
+      created_at
+    FROM review_queue
+    WHERE id = ?
+  `).get(id) as ReviewQueueItem | undefined;
+}
+
+export function updateReviewItemStatus(
+  db: BetterSqliteDatabase,
+  id: number,
+  status: ReviewQueueItem['status']
+) {
+  db.prepare(`
+    UPDATE review_queue
+    SET status = ?
+    WHERE id = ?
+  `).run(status, id);
+
+  return getReviewItemById(db, id);
+}
