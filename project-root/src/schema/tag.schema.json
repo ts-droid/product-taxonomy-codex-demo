@@ -1,11 +1,11 @@
 {
   "type": "object",
   "properties": {
-    "connector": {
+    "specification": {
       "type": "array",
       "items": { "type": "string" }
     },
-    "protocol": {
+    "compatibility": {
       "type": "array",
       "items": { "type": "string" }
     },

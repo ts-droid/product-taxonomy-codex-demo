@@ -1,17 +1,15 @@
-import connectors from '../taxonomy/connectors.json';
-import protocols from '../taxonomy/protocols.json';
-import features from '../taxonomy/features.json';
-import powerProfiles from '../taxonomy/power_profiles.json';
+import specifications from '../taxonomy/specifications.json';
+import compatibilityTargets from '../taxonomy/compatibility_targets.json';
+import featureRegistry from '../taxonomy/feature_registry.json';
 import { initializeDatabase } from '../db/database';
-import { getAllTags, getTagsByKey, upsertTag } from '../db/tagRepository';
+import { findTagByAlias, getAllTags, getTagsByKey } from '../db/tagRepository';
 import { enqueueReviewItem, listReviewQueue } from '../db/reviewQueueRepository';
 
 export function getTaxonomy() {
   return {
-    connectors: connectors.connectors,
-    protocols: protocols.protocols,
-    features: features.features,
-    power_profiles: powerProfiles.power_profiles,
+    specifications: specifications.specifications,
+    compatibility_targets: compatibilityTargets.compatibility_targets,
+    features: featureRegistry.features,
   };
 }
 
@@ -27,13 +25,19 @@ export function getStoredTaxonomyTags(tagKey?: string) {
 export function queueCandidateTag(input: {
   sourceRef?: string;
   tagKey: string;
-  tagValue: string;
+  candidateValue: string;
+  suggestedDisplayName?: string;
+  suggestedGroup?: string;
   reason: string;
+  evidence?: Record<string, unknown>;
 }) {
   const db = initializeDatabase();
   try {
-    upsertTag(db, input.tagKey, input.tagValue, 'pending_approval', 'ai_candidate');
-    return enqueueReviewItem(db, input);
+    const matchedTag = findTagByAlias(db, input.tagKey, input.candidateValue);
+    return enqueueReviewItem(db, {
+      ...input,
+      matchedTagId: matchedTag?.id ?? null,
+    });
   } finally {
     db.close();
   }

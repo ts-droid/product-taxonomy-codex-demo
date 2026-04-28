@@ -1,11 +1,11 @@
 {
   "filters": [
     {
-      "key": "connector",
+      "key": "specification",
       "type": "pills"
     },
     {
-      "key": "protocol",
+      "key": "compatibility",
       "type": "pills"
     },
     {

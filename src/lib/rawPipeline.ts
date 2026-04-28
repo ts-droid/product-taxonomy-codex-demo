@@ -1,4 +1,5 @@
 import type { Product, ProductType, Settings } from './catalog';
+import { buildKnownTaxonomyContext } from './knownTaxonomy';
 
 export type ImportedRawSource = {
   id: number;
@@ -8,6 +9,7 @@ export type ImportedRawSource = {
   rawText: string;
   highlightLines: string[];
   specificationLines: string[];
+  compatibilityLines: string[];
   excerpt: string;
   fetchedAt: string;
 };
@@ -34,27 +36,36 @@ export type ReferenceImportFailure = {
   error: string;
 };
 
+const KNOWN_TAXONOMY_CONTEXT = buildKnownTaxonomyContext();
+
 export const DEFAULT_RAW_PROMPT_TEMPLATE = `Du extraherar produktfakta från en e-handelsprodukts egen RAW-källa.
 
 Mål:
 - identifiera verifierbara fakta från produktens egen sida
 - identifiera productType
 - föreslå mainCategory och subCategory
-- extrahera specificationTags för filtrering
-- extrahera featureTags för navigation, rekommendationer och merchandising
+- matcha specificationTags mot kända specifikationer först
+- matcha compatibilityTags ("passar till/med") mot kända kompatibilitetsmål först
+- matcha featureTags mot kända funktioner först
+- skapa review-förslag bara när ingen känd canonical tag passar
 
 Viktiga regler:
 - använd bara fakta som stöds av RAW-innehållet
 - prioritera explicita specs före marknadsföringstext
 - ignorera externa referenser helt i detta steg
+- börja alltid med att matcha mot KNOWN TAXONOMY CONTEXT nedan
 - specificationTags ska vara korta, normaliserade, konkreta och tekniskt filterbara
-- specificationTags ska främst beskriva standarder, versioner, effekt, porttyper, anslutningstyper, laddningsteknik och lagringsteknik
-- använd gärna taggar som bluetooth, bluetooth 5.2, wifi, wifi 6, 100w, gan, power delivery, usb-c, usb-a, hdmi, displayport, ethernet, sd-kortläsare, usb-c till usb-c
-- lägg inte in mått, längd, skärmstorlek, färg, material eller allmän marknadsföring i specificationTags
+- specificationTags ska främst beskriva standarder, versioner, effekt, porttyper, anslutningstyper, laddningsteknik, lagringsteknik och kabeltyp
+- lägg inte in mått, längd, skärmstorlek, färg, material, vikt eller allmän marknadsföring i specificationTags
+- om källtexten innehåller mått som "3.7 tum" eller "4,11 cm" ska de ignoreras för tagging även om de ser viktiga ut i texten
 - färg ska i stället hamna i color-fältet när det är relevant
 - layout ska bara användas som specificationTag för tangentbord eller keypads
-- featureTags ska beskriva användningsfall, egenskaper eller kontext
+- compatibilityTags ska bara beskriva vilka enheter eller produktfamiljer produkten passar till eller fungerar med
+- featureTags ska beskriva användningsfall, egenskaper eller kontext, inte portar eller kompatibilitet
+- använd canonical id från known taxonomy när du hittar en tydlig match
+- om ingen känd canonical tag passar, lägg förslaget i en suggestedNew-lista i stället för att hitta på en ny fri specificationTag/compatibilityTag/featureTag
 - max {{maxSpecTags}} specificationTags
+- max 12 compatibilityTags
 - max {{maxFeatureTags}} featureTags
 - om något är osäkert, utelämna det hellre än att gissa
 
@@ -66,8 +77,24 @@ Returnera JSON i detta schema:
   "series": "string | null",
   "color": "string | null",
   "layout": "string | null",
-  "specificationTags": ["string"],
-  "featureTags": ["string"],
+  "specificationTags": [
+    { "id": "string", "label": "string", "group": "string", "evidence": "string" }
+  ],
+  "suggestedSpecificationTags": [
+    { "candidateLabel": "string", "proposedGroup": "string", "evidence": "string", "reason": "string" }
+  ],
+  "compatibilityTags": [
+    { "id": "string", "label": "string", "group": "string", "evidence": "string" }
+  ],
+  "suggestedCompatibilityTags": [
+    { "candidateLabel": "string", "proposedGroup": "string", "evidence": "string", "reason": "string" }
+  ],
+  "featureTags": [
+    { "id": "string", "label": "string", "group": "string", "evidence": "string" }
+  ],
+  "suggestedFeatureTags": [
+    { "candidateLabel": "string", "proposedGroup": "string", "evidence": "string", "reason": "string" }
+  ],
   "reasoning": {
     "evidenceLines": ["string"],
     "notes": "kort förklaring",
@@ -86,14 +113,21 @@ highlightLines:
 specificationLines:
 {{specificationLines}}
 
+compatibilityLines:
+{{compatibilityLines}}
+
 rawExcerpt:
-{{rawExcerpt}}`;
+{{rawExcerpt}}
+
+KNOWN TAXONOMY CONTEXT
+{{knownTaxonomyContext}}`;
 
 export const DEFAULT_REFERENCE_PROMPT_TEMPLATE = `Du analyserar externa referenssidor som sekundärt stöd för en produktklassificering.
 
 Mål:
 - normalisera kategori- och taggvokabulär mot tillverkarsida, supportsida eller annan referenskälla
-- föreslå vilka specifikationer och featureTags som verkar återkomma i relaterade referenser
+- hjälpa till att matcha specifikationer, kompatibilitet och funktioner mot kända canonical tags
+- föreslå vilka nya specifikationer, kompatibilitetsmål eller funktioner som bör skickas till review
 - hitta eventuella benämningar, synonymgrupper och kategorispråk som kan hjälpa slutlig klassificering
 
 Viktiga regler:
@@ -101,9 +135,13 @@ Viktiga regler:
 - externa referenser får bara stärka, normalisera eller förtydliga sådant som redan antyds i RAW-källan
 - om en referens motsäger tydliga fakta i RAW-källan ska du markera konflikten i stället för att skriva över produktfakta
 - prioritera referenser med hög term-matchning och tydlig produktsläktskap
-- canonicalSpecificationTags ska följa samma tekniska principer som specificationTags: standarder, versioner, effekt, portar, anslutningstyper och tekniker
-- canonicalSpecificationTags får inte innehålla mått, färger, material eller allmän livsstilstext
+- börja alltid med KNOWN TAXONOMY CONTEXT och försök mappa till existerande ids innan du föreslår nya
+- canonicalSpecificationTags ska följa samma tekniska principer som specificationTags: standarder, versioner, effekt, portar, anslutningstyper, kabeltyp och tekniker
+- canonicalSpecificationTags får inte innehålla mått, färger, material, vikt eller allmän livsstilstext
+- canonicalCompatibilityTags ska beskriva "passar till/med" och mappas till kända kompatibilitetsmål när det går
+- canonicalFeatureTags ska beskriva funktioner och användningsfall, inte portar eller kompatibilitet
 - max {{maxSpecTags}} canonicalSpecificationTags
+- max 12 canonicalCompatibilityTags
 - max {{maxFeatureTags}} canonicalFeatureTags
 
 Returnera JSON i detta schema:
@@ -112,8 +150,24 @@ Returnera JSON i detta schema:
   "recommendedProductType": "string | null",
   "recommendedMainCategory": "string | null",
   "recommendedSubCategory": "string | null",
-  "canonicalSpecificationTags": ["string"],
-  "canonicalFeatureTags": ["string"],
+  "canonicalSpecificationTags": [
+    { "id": "string", "label": "string", "group": "string", "evidence": "string" }
+  ],
+  "suggestedSpecificationTags": [
+    { "candidateLabel": "string", "proposedGroup": "string", "evidence": "string", "reason": "string" }
+  ],
+  "canonicalCompatibilityTags": [
+    { "id": "string", "label": "string", "group": "string", "evidence": "string" }
+  ],
+  "suggestedCompatibilityTags": [
+    { "candidateLabel": "string", "proposedGroup": "string", "evidence": "string", "reason": "string" }
+  ],
+  "canonicalFeatureTags": [
+    { "id": "string", "label": "string", "group": "string", "evidence": "string" }
+  ],
+  "suggestedFeatureTags": [
+    { "candidateLabel": "string", "proposedGroup": "string", "evidence": "string", "reason": "string" }
+  ],
   "supportingReferences": [
     {
       "title": "string",
@@ -136,11 +190,17 @@ highlightLines:
 specificationLines:
 {{specificationLines}}
 
+compatibilityLines:
+{{compatibilityLines}}
+
 rawExcerpt:
 {{rawExcerpt}}
 
 REFERENCE CONTEXT
-{{referenceContext}}`;
+{{referenceContext}}
+
+KNOWN TAXONOMY CONTEXT
+{{knownTaxonomyContext}}`;
 
 const seriesList = [
   'm1', 'x1', 'x3', 'w1', 'w3', 'sm1', 'sm3', 'r1', 'r2', 'c1', 'ex1', 'ex3',
@@ -453,6 +513,7 @@ function sourceSearchText(source: ImportedRawSource): string {
     source.slug,
     source.sourceTitle,
     source.specificationLines.join(' '),
+    source.compatibilityLines.join(' '),
     source.highlightLines.join(' '),
     source.rawText,
   ].join(' '));
@@ -569,6 +630,7 @@ export function parseImportedProducts(sources: ImportedRawSource[], settings: Se
 export function buildRawExtractionPrompt(source: ImportedRawSource, settings: Settings, template = DEFAULT_RAW_PROMPT_TEMPLATE): string {
   const specificationLines = formatBulletLines(source.specificationLines, 'Inga explicita specifikationsrader hittades');
   const highlightLines = formatBulletLines(source.highlightLines, 'Inga separata highlight-rader hittades');
+  const compatibilityLines = formatBulletLines(source.compatibilityLines, 'Inga explicita kompatibilitetsrader hittades');
   return renderPromptTemplate(template, {
     maxSpecTags: settings.maxSpecTags,
     maxFeatureTags: settings.maxFeatureTags,
@@ -578,6 +640,8 @@ export function buildRawExtractionPrompt(source: ImportedRawSource, settings: Se
     highlightLines,
     specificationLines,
     rawExcerpt: source.excerpt,
+    compatibilityLines,
+    knownTaxonomyContext: KNOWN_TAXONOMY_CONTEXT,
   });
 }
 
@@ -590,6 +654,7 @@ export function buildReferenceSupportPrompt(
   const referenceContext = formatReferenceContext(source, references, 4);
   const specificationLines = formatBulletLines(source.specificationLines, 'Inga explicita specifikationsrader hittades');
   const highlightLines = formatBulletLines(source.highlightLines, 'Inga separata highlight-rader hittades');
+  const compatibilityLines = formatBulletLines(source.compatibilityLines, 'Inga explicita kompatibilitetsrader hittades');
   return renderPromptTemplate(template, {
     maxSpecTags: settings.maxSpecTags,
     maxFeatureTags: settings.maxFeatureTags,
@@ -599,7 +664,9 @@ export function buildReferenceSupportPrompt(
     highlightLines,
     specificationLines,
     rawExcerpt: source.excerpt,
+    compatibilityLines,
     referenceContext,
+    knownTaxonomyContext: KNOWN_TAXONOMY_CONTEXT,
   });
 }
 

@@ -3,19 +3,20 @@
     "id": "demo_hub_001",
     "name": "USB-C Multiport Hub",
     "tags": {
-      "connector": ["usb_c", "hdmi", "rj45", "sd"],
-      "protocol": ["usb3"],
+      "specification": ["usb_c", "hdmi", "rj45", "sd", "usb4", "power_delivery"],
+      "compatibility": ["macbook_pro", "ipad"],
       "power_watt": 100,
-      "features": ["ethernet", "power_delivery", "video_output", "sd_reader"]
+      "features": ["video_output", "desktop_setup"]
     }
   },
   {
     "id": "demo_charger_001",
     "name": "GaN Charger 100W",
     "tags": {
-      "connector": ["usb_c"],
+      "specification": ["usb_c", "gan", "power_delivery", "pd_3_1"],
+      "compatibility": ["iphone", "ipad", "macbook"],
       "power_watt": 100,
-      "features": ["power_delivery", "fast_charge"]
+      "features": ["portable"]
     }
   }
 ]

@@ -1,0 +1,16 @@
+{
+  "features": [
+    { "id": "ergonomic", "label": "Ergonomisk", "group": "usability", "aliases": ["ergonomisk", "ergonomic"] },
+    { "id": "wireless", "label": "Trådlös", "group": "connectivity", "aliases": ["trådlös", "wireless"] },
+    { "id": "rechargeable", "label": "Uppladdningsbar", "group": "power", "aliases": ["uppladdningsbar", "rechargeable"] },
+    { "id": "portable", "label": "Resevänlig", "group": "mobility", "aliases": ["resevänlig", "travel friendly", "portable"] },
+    { "id": "foldable", "label": "Vikbar", "group": "form_factor", "aliases": ["vikbar", "foldable"] },
+    { "id": "magnetic", "label": "Magnetisk", "group": "mounting", "aliases": ["magnetisk", "magnetic"] },
+    { "id": "desktop_setup", "label": "Skrivbordssetup", "group": "use_case", "aliases": ["skrivbordssetup", "desktop setup"] },
+    { "id": "video_output", "label": "Videoutgång", "group": "media", "aliases": ["videoutgång", "video output"] },
+    { "id": "call_recording", "label": "Samtalsinspelning", "group": "recording", "aliases": ["samtalsinspelning", "call recording"] },
+    { "id": "meeting_recording", "label": "Mötesinspelning", "group": "recording", "aliases": ["mötesinspelning", "meeting recording"] },
+    { "id": "transcription", "label": "Transkribering", "group": "ai", "aliases": ["transkribering", "transcription"] },
+    { "id": "ai_summary", "label": "AI-sammanfattning", "group": "ai", "aliases": ["ai-sammanfattning", "ai summary"] }
+  ]
+}

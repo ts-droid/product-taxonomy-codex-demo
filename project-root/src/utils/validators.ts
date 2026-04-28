@@ -2,8 +2,8 @@ type ProductShape = {
   id?: unknown;
   name?: unknown;
   tags?: {
-    connector?: unknown;
-    protocol?: unknown;
+    specification?: unknown;
+    compatibility?: unknown;
     power_watt?: unknown;
     features?: unknown;
   };
@@ -32,27 +32,27 @@ export function validateProduct(product: ProductShape): ValidationResult {
   if (!product.tags || typeof product.tags !== 'object') {
     errors.push('missing tags');
   } else {
-    if (!isStringArray(product.tags.connector)) {
-      errors.push('connector is required and must be a non-empty string array');
+    if (!isStringArray(product.tags.specification)) {
+      errors.push('specification is required and must be a non-empty string array');
     }
 
-    if (typeof product.tags.power_watt !== 'number') {
-      errors.push('power_watt is required and must be a number');
+    if (product.tags.power_watt !== undefined && typeof product.tags.power_watt !== 'number') {
+      errors.push('power_watt must be a number');
     }
 
-    if (product.tags.connector !== undefined && !isStringArray(product.tags.connector)) {
-      errors.push('connector must be a non-empty string array');
+    if (product.tags.specification !== undefined && !isStringArray(product.tags.specification)) {
+      errors.push('specification must be a non-empty string array');
     }
 
-    if (product.tags.protocol !== undefined && !isStringArray(product.tags.protocol)) {
-      errors.push('protocol must be a non-empty string array');
+    if (product.tags.compatibility !== undefined && !isStringArray(product.tags.compatibility)) {
+      errors.push('compatibility must be a non-empty string array');
     }
 
     if (product.tags.features !== undefined && !isStringArray(product.tags.features)) {
       errors.push('features must be a non-empty string array');
     }
 
-    const hasEmptyArray = [product.tags.connector, product.tags.protocol, product.tags.features]
+    const hasEmptyArray = [product.tags.specification, product.tags.compatibility, product.tags.features]
       .some((value) => Array.isArray(value) && value.length === 0);
     if (hasEmptyArray) {
       errors.push('no_empty_tags violated');

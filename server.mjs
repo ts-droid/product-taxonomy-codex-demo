@@ -80,6 +80,13 @@ function makeLines(text) {
     .filter(Boolean);
 }
 
+function removeLowSignalLines(text) {
+  const lowSignalPattern = /mått|dimension|storlek|size|height|width|depth|bredd|höjd|hojd|djup|tjocklek|vikt|weight|f[aä]rg|color|colour|material|finish|warranty|garanti/i;
+  return makeLines(text)
+    .filter((line) => !lowSignalPattern.test(line))
+    .join('\n');
+}
+
 function extractJsonLdObjects(html) {
   const matches = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
   const result = [];
@@ -140,6 +147,21 @@ function extractStructuredProduct(html) {
 }
 
 function collectSpecificationLines(lines) {
+  const techSignalPattern = /bluetooth|wi-?fi|usb|type-c|typ-c|thunderbolt|hdmi|displayport|ethernet|rj45|sd|micro ?sd|lightning|gan|power delivery|\bpd ?3\.[01]\b|\b\d{1,3}\s?w\b|qi2?|magsafe|nvme|ssd|3[.,]5\s?mm|audio jack|kortl[aä]sare|kabel|cable/i;
+  const allowedLabelPattern = /anslutning|connectivity|wireless|bluetooth|wi-?fi|port(ar)?|interface|protocol|thunderbolt|usb|hdmi|displayport|ethernet|rj45|sd|micro ?sd|kortl[aä]sare|laddning|charging|charge|power|watt|effekt|pd|power delivery|gan|qi2?|magsafe|kabel|cable|connector|anslutningstyp|storage|lagring|nvme|ssd/i;
+  const compatibilityPattern = /kompatibilitet|compatible|compatibility|works with|passar (till|med)|supports?|macbook|ipad|iphone|apple watch|windows laptop|pc laptop/i;
+  const lowSignalPattern = /mått|dimension|storlek|size|height|width|depth|bredd|höjd|hojd|djup|tjocklek|vikt|weight|f[aä]rg|color|colour|material|finish|warranty|garanti/i;
+
+  const isUsefulSpecLine = (line) => {
+    if (!/:/.test(line)) return false;
+    if (line.length > 180) return false;
+    if (lowSignalPattern.test(line)) return false;
+    if (compatibilityPattern.test(line)) return false;
+
+    const [label = ''] = line.split(':');
+    return allowedLabelPattern.test(label) || techSignalPattern.test(line);
+  };
+
   const headingIndex = lines.findIndex((line) => /^(specification|specifications|teknisk specifikation|specifikationer)$/i.test(line));
   if (headingIndex >= 0) {
     const scoped = [];
@@ -148,14 +170,35 @@ function collectSpecificationLines(lines) {
       scoped.push(line);
       if (scoped.length >= 20) break;
     }
-    const pairs = scoped.filter((line) => line.length <= 80);
+    const pairs = scoped.filter(isUsefulSpecLine);
     if (pairs.length) return pairs.slice(0, 14);
   }
 
   const fallbackIndex = lines.findIndex((line) => /specifikationer for produkten|specifikationer för produkten|product specifications/i.test(line));
   const source = fallbackIndex >= 0 ? lines.slice(fallbackIndex + 1, fallbackIndex + 16) : lines;
-  const pairs = source.filter((line) => /:/.test(line) && line.split(':')[0].trim().length <= 40);
-  return (pairs.length ? pairs : lines.filter((line) => /:/.test(line)).slice(0, 12)).slice(0, 12);
+  const pairs = source.filter((line) => isUsefulSpecLine(line) && line.split(':')[0].trim().length <= 40);
+  return (pairs.length ? pairs : lines.filter(isUsefulSpecLine).slice(0, 12)).slice(0, 12);
+}
+
+function collectCompatibilityLines(lines) {
+  const compatibilityPattern = /kompatibilitet|compatible|compatibility|works with|passar (till|med)|supports?/i;
+  const targetPattern = /macbook|ipad|iphone|apple watch|imac|mac mini|windows laptop|pc laptop|usb-c devices?/i;
+
+  const headingIndex = lines.findIndex((line) => /^(compatibility|kompatibilitet)$/i.test(line));
+  if (headingIndex >= 0) {
+    const scoped = [];
+    for (const line of lines.slice(headingIndex + 1)) {
+      if (/^(faq|reviews|what'?s included|how to use|support|manual)$/i.test(line)) break;
+      if (compatibilityPattern.test(line) || targetPattern.test(line)) scoped.push(line);
+      if (scoped.length >= 12) break;
+    }
+    if (scoped.length) return scoped.slice(0, 12);
+  }
+
+  return lines
+    .filter((line) => line.length <= 180)
+    .filter((line) => compatibilityPattern.test(line) || (/:/.test(line) && targetPattern.test(line)))
+    .slice(0, 12);
 }
 
 function collectHighlightLines(lines) {
@@ -248,10 +291,11 @@ async function fetchRawSource(url, index) {
     const slug = extractSlug(url, index);
     const structured = extractStructuredProduct(html);
     const metaDescription = extractMetaContent(html, 'description', 'name');
-    const descriptionText = structured?.description || metaDescription || '';
+    const descriptionText = removeLowSignalLines(structured?.description || metaDescription || '');
     const specificationLines = collectSpecificationLines(lines);
-    const highlightLines = structured?.description
-      ? collectDescriptionHighlights(structured.description)
+    const compatibilityLines = collectCompatibilityLines(lines);
+    const highlightLines = descriptionText
+      ? collectDescriptionHighlights(descriptionText)
       : collectHighlightLines(lines);
     const focusedText = [
       structured?.name,
@@ -259,6 +303,7 @@ async function fetchRawSource(url, index) {
       metaDescription,
       descriptionText,
       specificationLines.join('\n'),
+      compatibilityLines.join('\n'),
       highlightLines.join('\n'),
     ].filter(Boolean).join('\n\n');
 
@@ -270,6 +315,7 @@ async function fetchRawSource(url, index) {
       rawText: focusedText || text,
       highlightLines,
       specificationLines,
+      compatibilityLines,
       excerpt: excerpt(focusedText || text),
       fetchedAt: new Date().toISOString(),
     };

@@ -1,6 +1,6 @@
 export type ProductTags = {
-  connector?: string[];
-  protocol?: string[];
+  specification?: string[];
+  compatibility?: string[];
   power_watt?: number;
   features?: string[];
   [key: string]: unknown;

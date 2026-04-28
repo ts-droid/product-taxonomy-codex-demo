@@ -148,6 +148,7 @@ export default function App() {
         rawText: product.searchText,
         highlightLines: [],
         specificationLines: [],
+        compatibilityLines: [],
         excerpt: product.searchText,
         fetchedAt: '',
       };
@@ -418,7 +419,7 @@ export default function App() {
               )}
               <div className="info-box">
                 <strong>Stödda placeholders</strong>
-                <p><code>{'{{rawUrl}}'}</code>, <code>{'{{slug}}'}</code>, <code>{'{{title}}'}</code>, <code>{'{{highlightLines}}'}</code>, <code>{'{{specificationLines}}'}</code>, <code>{'{{rawExcerpt}}'}</code>, <code>{'{{referenceContext}}'}</code>, <code>{'{{maxSpecTags}}'}</code>, <code>{'{{maxFeatureTags}}'}</code>.</p>
+                <p><code>{'{{rawUrl}}'}</code>, <code>{'{{slug}}'}</code>, <code>{'{{title}}'}</code>, <code>{'{{highlightLines}}'}</code>, <code>{'{{specificationLines}}'}</code>, <code>{'{{compatibilityLines}}'}</code>, <code>{'{{rawExcerpt}}'}</code>, <code>{'{{referenceContext}}'}</code>, <code>{'{{knownTaxonomyContext}}'}</code>, <code>{'{{maxSpecTags}}'}</code>, <code>{'{{maxFeatureTags}}'}</code>.</p>
               </div>
               <div className="split-grid">
                 <div className="field-stack">

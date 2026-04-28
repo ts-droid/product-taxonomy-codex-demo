@@ -1,0 +1,16 @@
+{
+  "compatibility_targets": [
+    { "id": "macbook_pro", "label": "MacBook Pro", "group": "laptop", "aliases": ["macbook pro"] },
+    { "id": "macbook_air", "label": "MacBook Air", "group": "laptop", "aliases": ["macbook air"] },
+    { "id": "macbook", "label": "MacBook", "group": "laptop", "aliases": ["macbook"] },
+    { "id": "ipad_pro", "label": "iPad Pro", "group": "tablet", "aliases": ["ipad pro"] },
+    { "id": "ipad_air", "label": "iPad Air", "group": "tablet", "aliases": ["ipad air"] },
+    { "id": "ipad", "label": "iPad", "group": "tablet", "aliases": ["ipad"] },
+    { "id": "iphone", "label": "iPhone", "group": "phone", "aliases": ["iphone"] },
+    { "id": "apple_watch", "label": "Apple Watch", "group": "wearable", "aliases": ["apple watch"] },
+    { "id": "imac", "label": "iMac", "group": "desktop", "aliases": ["imac"] },
+    { "id": "mac_mini", "label": "Mac mini", "group": "desktop", "aliases": ["mac mini"] },
+    { "id": "windows_laptop", "label": "Windows laptop", "group": "laptop", "aliases": ["windows laptop", "pc laptop"] },
+    { "id": "usb_c_devices", "label": "USB-C devices", "group": "generic", "aliases": ["usb-c devices", "usb c devices"] }
+  ]
+}
