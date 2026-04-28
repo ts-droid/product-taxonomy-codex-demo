@@ -21,6 +21,8 @@ import { StatCard } from './components/StatCard';
 import { DEFAULT_RAW_URLS, DEFAULT_REFERENCES, DEFAULT_SETTINGS } from './lib/demoData';
 import { buildTaxonomy, parseProducts, type Product, type Settings } from './lib/catalog';
 import {
+  DEFAULT_RAW_PROMPT_TEMPLATE,
+  DEFAULT_REFERENCE_PROMPT_TEMPLATE,
   buildRawExtractionPrompt,
   buildReferenceSupportPrompt,
   matchReferenceSources,
@@ -79,11 +81,21 @@ function currentProducts(mainGroup: ReturnType<typeof buildTaxonomy>['mainGroups
 }
 
 export default function App() {
+  const defaultPromptTemplates = useMemo(() => ({
+    raw: DEFAULT_RAW_PROMPT_TEMPLATE,
+    reference: DEFAULT_REFERENCE_PROMPT_TEMPLATE,
+  }), []);
   const [mode, setMode] = useState<'admin' | 'customer'>('admin');
   const [draftRawUrls, setDraftRawUrls] = useState(DEFAULT_RAW_URLS);
   const [draftReferences, setDraftReferences] = useState(DEFAULT_REFERENCES);
   const [draftSettings, setDraftSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [applied, setApplied] = useState({ rawUrls: DEFAULT_RAW_URLS, references: DEFAULT_REFERENCES, settings: DEFAULT_SETTINGS });
+  const [draftPromptTemplates, setDraftPromptTemplates] = useState(defaultPromptTemplates);
+  const [applied, setApplied] = useState({
+    rawUrls: DEFAULT_RAW_URLS,
+    references: DEFAULT_REFERENCES,
+    settings: DEFAULT_SETTINGS,
+    promptTemplates: defaultPromptTemplates,
+  });
   const [importedSources, setImportedSources] = useState<ImportedRawSource[]>([]);
   const [importFailures, setImportFailures] = useState<RawImportFailure[]>([]);
   const [importedReferences, setImportedReferences] = useState<ImportedReferenceSource[]>([]);
@@ -97,7 +109,11 @@ export default function App() {
   const [selectedSpecFilters, setSelectedSpecFilters] = useState<string[]>([]);
   const [search, setSearch] = useState('');
 
-  const dirty = draftRawUrls !== applied.rawUrls || draftReferences !== applied.references || JSON.stringify(draftSettings) !== JSON.stringify(applied.settings);
+  const promptTemplatesDirty = JSON.stringify(draftPromptTemplates) !== JSON.stringify(applied.promptTemplates);
+  const dirty = draftRawUrls !== applied.rawUrls
+    || draftReferences !== applied.references
+    || JSON.stringify(draftSettings) !== JSON.stringify(applied.settings)
+    || promptTemplatesDirty;
   const draftRawUrlCount = useMemo(() => draftRawUrls.split(/\n+/).map((v) => v.trim()).filter(Boolean).length, [draftRawUrls]);
   const appliedRawUrlCount = useMemo(() => applied.rawUrls.split(/\n+/).map((v) => v.trim()).filter(Boolean).length, [applied.rawUrls]);
   const products = useMemo(
@@ -111,12 +127,12 @@ export default function App() {
     [importedSources, selectedPromptSourceId]
   );
   const rawPromptPreview = useMemo(
-    () => (promptSource ? buildRawExtractionPrompt(promptSource, applied.settings) : ''),
-    [promptSource, applied.settings]
+    () => (promptSource ? buildRawExtractionPrompt(promptSource, applied.settings, applied.promptTemplates.raw) : ''),
+    [promptSource, applied.settings, applied.promptTemplates]
   );
   const referencePromptPreview = useMemo(
-    () => (promptSource ? buildReferenceSupportPrompt(promptSource, applied.settings, importedReferences) : ''),
-    [promptSource, applied.settings, importedReferences]
+    () => (promptSource ? buildReferenceSupportPrompt(promptSource, applied.settings, importedReferences, applied.promptTemplates.reference) : ''),
+    [promptSource, applied.settings, importedReferences, applied.promptTemplates]
   );
   const matchedPromptReferences = useMemo(
     () => (promptSource ? matchReferenceSources(promptSource, importedReferences, 3) : []),
@@ -182,7 +198,12 @@ export default function App() {
   }, [products]);
 
   const rebuild = () => {
-    setApplied({ rawUrls: draftRawUrls, references: draftReferences, settings: { ...draftSettings } });
+    setApplied({
+      rawUrls: draftRawUrls,
+      references: draftReferences,
+      settings: { ...draftSettings },
+      promptTemplates: { ...draftPromptTemplates },
+    });
     setImportedSources([]);
     setImportFailures([]);
     setImportedReferences([]);
@@ -197,10 +218,27 @@ export default function App() {
     setDraftRawUrls(applied.rawUrls);
     setDraftReferences(applied.references);
     setDraftSettings({ ...applied.settings });
+    setDraftPromptTemplates({ ...applied.promptTemplates });
+  };
+
+  const applyPromptTemplates = () => {
+    setApplied((current) => ({
+      ...current,
+      promptTemplates: { ...draftPromptTemplates },
+    }));
+  };
+
+  const resetPromptTemplates = () => {
+    setDraftPromptTemplates({ ...defaultPromptTemplates });
   };
 
   const importRawData = async () => {
-    const nextApplied = { rawUrls: draftRawUrls, references: draftReferences, settings: { ...draftSettings } };
+    const nextApplied = {
+      rawUrls: draftRawUrls,
+      references: draftReferences,
+      settings: { ...draftSettings },
+      promptTemplates: { ...draftPromptTemplates },
+    };
     setApplied(nextApplied);
     setImportStatus('loading');
     setImportFailures([]);
@@ -367,7 +405,31 @@ export default function App() {
               </div>
             </Section>
 
-            <Section title="Prompt-preview" subtitle="Visar nu två separata promptar: en för RAW-extraktion och en för extern referensanalys." icon={BrainCircuit} right={importedSources.length ? <Badge tone="accent">LLM-ready</Badge> : <Badge tone="warning">Import krävs</Badge>}>
+            <Section title="Prompt-preview" subtitle="Visar promptmallarna i klartext, låter dig redigera dem och renderar aktuell preview för vald produkt." icon={BrainCircuit} right={importedSources.length ? <Badge tone="accent">LLM-ready</Badge> : <Badge tone="warning">Import krävs</Badge>}>
+              <div className="button-row">
+                <button className="primary-button" onClick={applyPromptTemplates}><Save size={16} /> Applicera promptmallar</button>
+                <button className="secondary-button" onClick={resetPromptTemplates}><RefreshCcw size={16} /> Återställ standardprompter</button>
+              </div>
+              {promptTemplatesDirty && (
+                <div className="warning-box">
+                  <strong>Promptutkastet används inte ännu</strong>
+                  <div className="small">Previewn fortsätter visa de applicerade promptmallarna tills du klickar `Applicera promptmallar`, `Spara / bygg om` eller `Läs in RAW-data`.</div>
+                </div>
+              )}
+              <div className="info-box">
+                <strong>Stödda placeholders</strong>
+                <p><code>{'{{rawUrl}}'}</code>, <code>{'{{slug}}'}</code>, <code>{'{{title}}'}</code>, <code>{'{{highlightLines}}'}</code>, <code>{'{{specificationLines}}'}</code>, <code>{'{{rawExcerpt}}'}</code>, <code>{'{{referenceContext}}'}</code>, <code>{'{{maxSpecTags}}'}</code>, <code>{'{{maxFeatureTags}}'}</code>.</p>
+              </div>
+              <div className="split-grid">
+                <div className="field-stack">
+                  <label>RAW-promptmall</label>
+                  <textarea className="code-area" value={draftPromptTemplates.raw} onChange={(e) => setDraftPromptTemplates((current) => ({ ...current, raw: e.target.value }))} />
+                </div>
+                <div className="field-stack">
+                  <label>Referens-promptmall</label>
+                  <textarea className="code-area" value={draftPromptTemplates.reference} onChange={(e) => setDraftPromptTemplates((current) => ({ ...current, reference: e.target.value }))} />
+                </div>
+              </div>
               {importedSources.length ? (
                 <>
                   <div className="field-stack">
@@ -403,16 +465,16 @@ export default function App() {
                     )}
                   </div>
                   <div className="field-stack">
-                    <label>RAW-prompt</label>
+                    <label>Renderad RAW-prompt</label>
                     <textarea className="code-area" readOnly value={rawPromptPreview} />
                   </div>
                   <div className="field-stack">
-                    <label>Referens-prompt</label>
+                    <label>Renderad referens-prompt</label>
                     <textarea className="code-area" readOnly value={referencePromptPreview} />
                   </div>
                 </>
               ) : (
-                <div className="empty">Ingen prompt-preview ännu. Kör först RAW-import så att promptarna baseras på verkligt produktinnehåll och matchade externa referenser i stället för bara sluggen.</div>
+                <div className="empty">Promptmallarna kan redigeras redan nu. Kör sedan RAW-import för att rendera dem med verkligt produktinnehåll och matchade externa referenser i stället för bara sluggen.</div>
               )}
             </Section>
 

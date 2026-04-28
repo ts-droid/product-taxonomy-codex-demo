@@ -34,6 +34,114 @@ export type ReferenceImportFailure = {
   error: string;
 };
 
+export const DEFAULT_RAW_PROMPT_TEMPLATE = `Du extraherar produktfakta från en e-handelsprodukts egen RAW-källa.
+
+Mål:
+- identifiera verifierbara fakta från produktens egen sida
+- identifiera productType
+- föreslå mainCategory och subCategory
+- extrahera specificationTags för filtrering
+- extrahera featureTags för navigation, rekommendationer och merchandising
+
+Viktiga regler:
+- använd bara fakta som stöds av RAW-innehållet
+- prioritera explicita specs före marknadsföringstext
+- ignorera externa referenser helt i detta steg
+- specificationTags ska vara korta, normaliserade, konkreta och tekniskt filterbara
+- specificationTags ska främst beskriva standarder, versioner, effekt, porttyper, anslutningstyper, laddningsteknik och lagringsteknik
+- använd gärna taggar som bluetooth, bluetooth 5.2, wifi, wifi 6, 100w, gan, power delivery, usb-c, usb-a, hdmi, displayport, ethernet, sd-kortläsare, usb-c till usb-c
+- lägg inte in mått, längd, skärmstorlek, färg, material eller allmän marknadsföring i specificationTags
+- färg ska i stället hamna i color-fältet när det är relevant
+- layout ska bara användas som specificationTag för tangentbord eller keypads
+- featureTags ska beskriva användningsfall, egenskaper eller kontext
+- max {{maxSpecTags}} specificationTags
+- max {{maxFeatureTags}} featureTags
+- om något är osäkert, utelämna det hellre än att gissa
+
+Returnera JSON i detta schema:
+{
+  "productType": "Monitor | Mus | Tangentbord | Keypad | Röstinspelare / AI-note taker | Powerbank | Laddare | Dockningsstation | Hubb / Adapter | Kabel | Stativ / Hållare | Fodral / Skydd | Lifestyle | Övrigt tillbehör",
+  "mainCategory": "string",
+  "subCategory": "string",
+  "series": "string | null",
+  "color": "string | null",
+  "layout": "string | null",
+  "specificationTags": ["string"],
+  "featureTags": ["string"],
+  "reasoning": {
+    "evidenceLines": ["string"],
+    "notes": "kort förklaring",
+    "uncertainFields": ["string"]
+  }
+}
+
+INPUT
+rawUrl: {{rawUrl}}
+slug: {{slug}}
+title: {{title}}
+
+highlightLines:
+{{highlightLines}}
+
+specificationLines:
+{{specificationLines}}
+
+rawExcerpt:
+{{rawExcerpt}}`;
+
+export const DEFAULT_REFERENCE_PROMPT_TEMPLATE = `Du analyserar externa referenssidor som sekundärt stöd för en produktklassificering.
+
+Mål:
+- normalisera kategori- och taggvokabulär mot tillverkarsida, supportsida eller annan referenskälla
+- föreslå vilka specifikationer och featureTags som verkar återkomma i relaterade referenser
+- hitta eventuella benämningar, synonymgrupper och kategorispråk som kan hjälpa slutlig klassificering
+
+Viktiga regler:
+- produktens egen RAW-källa är primär sanning
+- externa referenser får bara stärka, normalisera eller förtydliga sådant som redan antyds i RAW-källan
+- om en referens motsäger tydliga fakta i RAW-källan ska du markera konflikten i stället för att skriva över produktfakta
+- prioritera referenser med hög term-matchning och tydlig produktsläktskap
+- canonicalSpecificationTags ska följa samma tekniska principer som specificationTags: standarder, versioner, effekt, portar, anslutningstyper och tekniker
+- canonicalSpecificationTags får inte innehålla mått, färger, material eller allmän livsstilstext
+- max {{maxSpecTags}} canonicalSpecificationTags
+- max {{maxFeatureTags}} canonicalFeatureTags
+
+Returnera JSON i detta schema:
+{
+  "referenceConfidence": "low | medium | high",
+  "recommendedProductType": "string | null",
+  "recommendedMainCategory": "string | null",
+  "recommendedSubCategory": "string | null",
+  "canonicalSpecificationTags": ["string"],
+  "canonicalFeatureTags": ["string"],
+  "supportingReferences": [
+    {
+      "title": "string",
+      "url": "string",
+      "whyItMatches": "string"
+    }
+  ],
+  "conflicts": ["string"],
+  "notes": "kort sammanfattning"
+}
+
+PRIMARY PRODUCT SNAPSHOT
+rawUrl: {{rawUrl}}
+slug: {{slug}}
+title: {{title}}
+
+highlightLines:
+{{highlightLines}}
+
+specificationLines:
+{{specificationLines}}
+
+rawExcerpt:
+{{rawExcerpt}}
+
+REFERENCE CONTEXT
+{{referenceContext}}`;
+
 const seriesList = [
   'm1', 'x1', 'x3', 'w1', 'w3', 'sm1', 'sm3', 'r1', 'r2', 'c1', 'ex1', 'ex3',
   'onthego', 'findall', 'pro hub', 'pro hub mini', 'dock5', 'quatro', 'trio', 'mobile xr', 'chargeview',
@@ -391,6 +499,13 @@ function formatBulletLines(lines: string[], fallback: string): string {
     : `- ${fallback}`;
 }
 
+function renderPromptTemplate(template: string, replacements: Record<string, string | number>): string {
+  return Object.entries(replacements).reduce(
+    (result, [key, value]) => result.replaceAll(`{{${key}}}`, String(value)),
+    template
+  );
+}
+
 function formatReferenceContext(source: ImportedRawSource, references: ImportedReferenceSource[], maxMatches = 3): string {
   const matchedReferences = matchReferenceSources(source, references, maxMatches);
   return matchedReferences.length
@@ -451,129 +566,53 @@ export function parseImportedProducts(sources: ImportedRawSource[], settings: Se
   }));
 }
 
-export function buildRawExtractionPrompt(source: ImportedRawSource, settings: Settings): string {
+export function buildRawExtractionPrompt(source: ImportedRawSource, settings: Settings, template = DEFAULT_RAW_PROMPT_TEMPLATE): string {
   const specificationLines = formatBulletLines(source.specificationLines, 'Inga explicita specifikationsrader hittades');
   const highlightLines = formatBulletLines(source.highlightLines, 'Inga separata highlight-rader hittades');
-
-  return `Du extraherar produktfakta från en e-handelsprodukts egen RAW-källa.
-
-Mål:
-- identifiera verifierbara fakta från produktens egen sida
-- identifiera productType
-- föreslå mainCategory och subCategory
-- extrahera specificationTags för filtrering
-- extrahera featureTags för navigation, rekommendationer och merchandising
-
-Viktiga regler:
-- använd bara fakta som stöds av RAW-innehållet
-- prioritera explicita specs före marknadsföringstext
-- ignorera externa referenser helt i detta steg
-- specificationTags ska vara korta, normaliserade, konkreta och tekniskt filterbara
-- specificationTags ska främst beskriva standarder, versioner, effekt, porttyper, anslutningstyper, laddningsteknik och lagringsteknik
-- använd gärna taggar som bluetooth, bluetooth 5.2, wifi, wifi 6, 100w, gan, power delivery, usb-c, usb-a, hdmi, displayport, ethernet, sd-kortläsare, usb-c till usb-c
-- lägg inte in mått, längd, skärmstorlek, färg, material eller allmän marknadsföring i specificationTags
-- färg ska i stället hamna i color-fältet när det är relevant
-- layout ska bara användas som specificationTag för tangentbord eller keypads
-- featureTags ska beskriva användningsfall, egenskaper eller kontext
-- max ${settings.maxSpecTags} specificationTags
-- max ${settings.maxFeatureTags} featureTags
-- om något är osäkert, utelämna det hellre än att gissa
-
-Returnera JSON i detta schema:
-{
-  "productType": "Monitor | Mus | Tangentbord | Keypad | Röstinspelare / AI-note taker | Powerbank | Laddare | Dockningsstation | Hubb / Adapter | Kabel | Stativ / Hållare | Fodral / Skydd | Lifestyle | Övrigt tillbehör",
-  "mainCategory": "string",
-  "subCategory": "string",
-  "series": "string | null",
-  "color": "string | null",
-  "layout": "string | null",
-  "specificationTags": ["string"],
-  "featureTags": ["string"],
-  "reasoning": {
-    "evidenceLines": ["string"],
-    "notes": "kort förklaring",
-    "uncertainFields": ["string"]
-  }
+  return renderPromptTemplate(template, {
+    maxSpecTags: settings.maxSpecTags,
+    maxFeatureTags: settings.maxFeatureTags,
+    rawUrl: source.rawUrl,
+    slug: source.slug,
+    title: source.sourceTitle,
+    highlightLines,
+    specificationLines,
+    rawExcerpt: source.excerpt,
+  });
 }
 
-INPUT
-rawUrl: ${source.rawUrl}
-slug: ${source.slug}
-title: ${source.sourceTitle}
-
-highlightLines:
-${highlightLines}
-
-specificationLines:
-${specificationLines}
-
-referenceContext:
-${referenceContext}
-
-rawExcerpt:
-${source.excerpt}`;
-}
-
-export function buildReferenceSupportPrompt(source: ImportedRawSource, settings: Settings, references: ImportedReferenceSource[] = []): string {
+export function buildReferenceSupportPrompt(
+  source: ImportedRawSource,
+  settings: Settings,
+  references: ImportedReferenceSource[] = [],
+  template = DEFAULT_REFERENCE_PROMPT_TEMPLATE
+): string {
   const referenceContext = formatReferenceContext(source, references, 4);
   const specificationLines = formatBulletLines(source.specificationLines, 'Inga explicita specifikationsrader hittades');
   const highlightLines = formatBulletLines(source.highlightLines, 'Inga separata highlight-rader hittades');
-
-  return `Du analyserar externa referenssidor som sekundärt stöd för en produktklassificering.
-
-Mål:
-- normalisera kategori- och taggvokabulär mot tillverkarsida, supportsida eller annan referenskälla
-- föreslå vilka specifikationer och featureTags som verkar återkomma i relaterade referenser
-- hitta eventuella benämningar, synonymgrupper och kategorispråk som kan hjälpa slutlig klassificering
-
-Viktiga regler:
-- produktens egen RAW-källa är primär sanning
-- externa referenser får bara stärka, normalisera eller förtydliga sådant som redan antyds i RAW-källan
-- om en referens motsäger tydliga fakta i RAW-källan ska du markera konflikten i stället för att skriva över produktfakta
-- prioritera referenser med hög term-matchning och tydlig produktsläktskap
-- canonicalSpecificationTags ska följa samma tekniska principer som specificationTags: standarder, versioner, effekt, portar, anslutningstyper och tekniker
-- canonicalSpecificationTags får inte innehålla mått, färger, material eller allmän livsstilstext
-- max ${settings.maxSpecTags} canonicalSpecificationTags
-- max ${settings.maxFeatureTags} canonicalFeatureTags
-
-Returnera JSON i detta schema:
-{
-  "referenceConfidence": "low | medium | high",
-  "recommendedProductType": "string | null",
-  "recommendedMainCategory": "string | null",
-  "recommendedSubCategory": "string | null",
-  "canonicalSpecificationTags": ["string"],
-  "canonicalFeatureTags": ["string"],
-  "supportingReferences": [
-    {
-      "title": "string",
-      "url": "string",
-      "whyItMatches": "string"
-    }
-  ],
-  "conflicts": ["string"],
-  "notes": "kort sammanfattning"
+  return renderPromptTemplate(template, {
+    maxSpecTags: settings.maxSpecTags,
+    maxFeatureTags: settings.maxFeatureTags,
+    rawUrl: source.rawUrl,
+    slug: source.slug,
+    title: source.sourceTitle,
+    highlightLines,
+    specificationLines,
+    rawExcerpt: source.excerpt,
+    referenceContext,
+  });
 }
 
-PRIMARY PRODUCT SNAPSHOT
-rawUrl: ${source.rawUrl}
-slug: ${source.slug}
-title: ${source.sourceTitle}
-
-highlightLines:
-${highlightLines}
-
-specificationLines:
-${specificationLines}
-
-REFERENCE CONTEXT
-${referenceContext}`;
-}
-
-export function buildTaggingPrompt(source: ImportedRawSource, settings: Settings, references: ImportedReferenceSource[] = []): string {
+export function buildTaggingPrompt(
+  source: ImportedRawSource,
+  settings: Settings,
+  references: ImportedReferenceSource[] = [],
+  rawTemplate = DEFAULT_RAW_PROMPT_TEMPLATE,
+  referenceTemplate = DEFAULT_REFERENCE_PROMPT_TEMPLATE
+): string {
   return `PROMPT 1: RAW EXTRACTION
-${buildRawExtractionPrompt(source, settings)}
+${buildRawExtractionPrompt(source, settings, rawTemplate)}
 
 PROMPT 2: REFERENCE SUPPORT
-${buildReferenceSupportPrompt(source, settings, references)}`;
+${buildReferenceSupportPrompt(source, settings, references, referenceTemplate)}`;
 }
