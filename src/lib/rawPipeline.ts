@@ -281,10 +281,34 @@ function normalize(text: string): string {
 }
 
 function tokenize(text: string): string[] {
+  const stopwords = new Set([
+    'the', 'and', 'for', 'with', 'that', 'this', 'from', 'your', 'you', 'are', 'but', 'not',
+    'att', 'och', 'med', 'som', 'det', 'den', 'har', 'for', 'för', 'till', 'fran', 'från', 'eller', 'pa', 'på',
+    'product', 'products', 'shop', 'store', 'electronics', 'electronic', 'accessories', 'accessory',
+    'apple', 'satechi', 'www', 'com', 'net', 'se', 'all', 'new',
+  ]);
+
   return normalize(text)
     .split(/[^a-z0-9]+/i)
     .map((token) => token.trim())
-    .filter((token) => token.length >= 3);
+    .filter((token) => token.length >= 3)
+    .filter((token) => !stopwords.has(token));
+}
+
+function detectReferenceIntent(text: string): string[] {
+  const intents: string[] = [];
+  if (/mouse|mus/.test(text)) intents.push('mouse');
+  if (/keyboard|tangentbord|keypad/.test(text)) intents.push('keyboard');
+  if (/airpods|headphones|headset|hörlurar|horlurar/.test(text)) intents.push('audio');
+  if (/charger|laddare|charging/.test(text)) intents.push('charger');
+  if (/hub|adapter|multiport/.test(text)) intents.push('hub');
+  if (/dock|dockningsstation/.test(text)) intents.push('dock');
+  if (/cable|kabel/.test(text)) intents.push('cable');
+  if (/stand|stativ|hållare|hallare/.test(text)) intents.push('stand');
+  if (/monitor|display|skärm|skarm/.test(text)) intents.push('display');
+  if (/powerbank/.test(text)) intents.push('powerbank');
+  if (/voice recorder|röstinspelare|rostinspelare|transcrib|transkrib/.test(text)) intents.push('recorder');
+  return intents;
 }
 
 function detectSeries(text: string): string | null {
@@ -536,19 +560,29 @@ export type MatchedReferenceSource = ImportedReferenceSource & {
 };
 
 export function matchReferenceSources(source: ImportedRawSource, references: ImportedReferenceSource[], maxMatches = 3): MatchedReferenceSource[] {
-  const sourceTokens = new Set(tokenize(sourceSearchText(source)));
+  const sourceText = sourceSearchText(source);
+  const sourceTokens = new Set(tokenize(sourceText));
+  const sourceIntent = new Set(detectReferenceIntent(sourceText));
 
   return references
     .map((reference) => {
-      const referenceTokens = Array.from(new Set(tokenize(referenceSearchText(reference))));
+      const referenceText = referenceSearchText(reference);
+      const referenceTokens = Array.from(new Set(tokenize(referenceText)));
+      const referenceIntent = new Set(detectReferenceIntent(referenceText));
       const overlap = referenceTokens.filter((token) => sourceTokens.has(token));
-      const score = overlap.length;
+      const weightedOverlap = overlap.reduce((sum, token) => sum + (token.length >= 6 ? 2 : 1), 0);
+      const sharedIntent = Array.from(referenceIntent).filter((token) => sourceIntent.has(token));
+      const mismatchedIntent = Array.from(referenceIntent).length > 0
+        && Array.from(sourceIntent).length > 0
+        && sharedIntent.length === 0;
+      const score = weightedOverlap + sharedIntent.length * 3 - (mismatchedIntent ? 4 : 0);
       return {
         ...reference,
         score,
         matchedTerms: overlap.slice(0, 8),
       };
     })
+    .filter((reference) => reference.matchedTerms.length >= 2 || reference.score >= 4)
     .filter((reference) => reference.score > 0)
     .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, 'sv'))
     .slice(0, maxMatches);
